@@ -24,6 +24,7 @@ our $playback_delay= 3; # seconds, XXX config?
 
 my ($mydir, $myname);
 BEGIN {
+    use Cwd 'abs_path';
     my $location= (-l $0) ? abs_path ($0) : $0;
     $location=~ /(.*?)([^\/]+?)_?\z/s or die "?";
     ($mydir, $myname)=($1,$2);
