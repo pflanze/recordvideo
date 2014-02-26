@@ -1,0 +1,19 @@
+- close prefs dialog when it is rolled up  through the window close button.
+  try to reopen it:
+***   Can't call method "set_text" on an undefined value at ./recordvideo line 618.
+***   	main::ComboBox('videodev', 'ARRAY(0x8b3337c)', 'HASH(0x9c12244)', '/dev/video0') called at ./recordvideo line 662
+***   	main::redo_settings('Gtk3::ImageMenuItem=HASH(0x9a6020c)') called at /usr/share/perl5/Gtk3.pm line 137
+***   	eval {...} called at /usr/share/perl5/Gtk3.pm line 137
+
+- why does that not stop?:
+1040     24047  0.0  0.4 169116 18904 pts/56   S    16:06   0:00 recordvideo pipe2_Process-ogg123-aplay
+1040     24052  0.0  0.4 169116 19000 pts/56   S    16:06   0:00 recordvideo pipe2_Process-ogg123-aplay
+1040     24053  0.0  0.0      0     0 pts/56   Z    16:06   0:00 [recordvideo pip] <defunct>
+1040     24055  0.2  0.0  25236  3396 pts/56   Sl   16:06   0:00 ogg123 -d wav -f - /home/chrisperl/tmp/RECORDVIDEOTEST/e-5.ogg
+
+without killall
+
+Super odd is that why did Stop_then proceed if those are still hanging around: well ok, subprocess. That didn't proxy down or dunno.
+
+- ctl-c when during recording leavea UI hanging around, huh.
+  (still add wrapper for a killall? but then doesnt ctl-c do a killall? ok not SIGINT?)

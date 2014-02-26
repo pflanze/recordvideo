@@ -1,0 +1,968 @@
+#!/usr/bin/perl -w
+
+# Thu Dec 26 03:29:00 GMT 2013
+(my $email='ch%christianjaeger,ch')=~ tr/%,/@./;
+
+use strict;
+
+our @videodevs= map { "/dev/video$_" } (0..3);
+our @audiodevs_input= ("default", map { "hw:$_,0" } (0..3)); # XX: ,0 or ,1?  sigh
+our @audiodevs_output= ("default", map { "hw:$_,0" } (0..3));
+
+our $default_config=
+  +{
+    basedir=> "$ENV{HOME}/tmp/RECORDVIDEOTEST", ##
+    videodev=> $videodevs[0],
+    mplayer_direct_opts=> '-tv device="$VIDEODEV":driver=v4l2 tv://',
+    mplayer_playback_opts=> '"$VIDEOPATH"',
+    mencoder_cmd=> 'mencoder -quiet tv:// -tv driver=v4l2"$SIZE":device="$VIDEODEV" -ovc lavc=yes -lavcopts vcodec=mpeg4 -nosound -o "$VIDEOPATH" -',
+    audiodev_input=> $audiodevs_input[0],
+    audiodev_output=> $audiodevs_output[0],
+   };
+
+our $playback_delay= 3; # seconds, XXX config?
+
+my ($mydir, $myname);
+BEGIN {
+    my $location= (-l $0) ? abs_path ($0) : $0;
+    $location=~ /(.*?)([^\/]+?)_?\z/s or die "?";
+    ($mydir, $myname)=($1,$2);
+}
+
+sub usage {
+    print STDERR map{"$_\n"} @_ if @_;
+    print "$myname ..
+
+  (Christian Jaeger <$email>)
+";
+exit (@_ ? 1 : 0);
+}
+
+use Getopt::Long;
+our $verbose=0;
+#our $opt_dry;
+GetOptions("verbose"=> \$verbose,
+	   "help"=> sub{usage},
+	   #"dry-run"=> \$opt_dry,
+	   ) or exit 1;
+#usage unless @ARGV;
+
+$Chj::Processes::verbose = $verbose;
+
+use lib "$mydir/lib";
+use Chj::UIProcessor;
+use Chj::Processes;
+use Chj::xperlfunc ":all";
+use Chj::chompspace;
+use Chj::IO::Command;
+use Chj::xsysopen ':all';
+use Chj::singlequote 'singlequote_sh';
+use Chj::callcc;
+use Chj::xtmpfile;
+use Gtk3 -init;
+use YAML qw(DumpFile LoadFile);
+use Chj::Gtk::Helpers;
+use Chj::Glib::Watcher;
+use Chj::Recordvideo::Utils;
+use Chj::Recordvideo::Devices;
+
+# -------------
+sub psname ($) {
+    my ($name)= @_;
+    $0= "recordvideo $name";
+}
+
+our $configpath= "$ENV{HOME}/.$myname.conf";
+
+our $config= -e $configpath ? LoadFile($configpath) : $default_config;
+defined $config or do {
+    warn "loading the config file failed, using default values instead";
+    $config= $default_config;
+};
+
+sub config ($) {
+    my ($key)=@_;
+    exists $$config{$key} or die "wrong config key '$key'";
+    defined $$config{$key} or die "undefined config key '$key'";
+    $$config{$key}
+}
+
+sub logbase () {
+    config ("basedir")."/."
+}
+
+sub logfh ($) {
+    my ($basename)=@_;
+    my $fh= xtmpfile (logbase.$basename.".log-");
+    $fh->autoclean(0);
+    $fh
+}
+
+sub templated_config ($$) {
+    my ($key,$env)=@_;
+    # implement shell quote parsing? ? ?
+    # or, use the shell ?
+    my $v= config $key;
+    # unsafe code execution !:
+    my $in= Chj::IO::Command->new_sender
+	($env,
+	 "bash", "-c", q{set -eu; perl -we 'print $_,"\0" for @ARGV' -- }.$v);
+    my @vals= $in->xreadline0;
+    $in->xxfinish;
+    local $/="\0"; chomp @vals;
+    @vals
+}
+
+sub filepaths ($) {
+    our ($tapename)= @_;
+    our $basepath= "$$config{basedir}/$tapename-";
+    our @nums= sort {
+	$a <=> $b
+    } map {
+	if (/\Q$basepath\E(\d+)/) {
+	    $1
+	} else {
+	    warn "ignoring '$_'" if $verbose;
+	    ()
+	}
+    } glob "${basepath}*";
+    my $highest_num= $nums[-1] || 0;
+    my $num= $highest_num+1;
+    my $b= $basepath . $num;
+    ($tapename . "-" . $num,
+     $b . ".dvd",
+     $b . ".ogg")
+}
+
+our $builder= new Gtk3::Builder;
+$builder->add_from_file("$mydir/recordvideo.glade");
+
+# get widget / gtk object
+sub get ($) {
+    my ($name)=@_;
+    $builder->get_object($name)
+      or die "missing object '$name' in glade file";
+}
+
+our $after_quit=0;
+
+sub error {
+    my ($msg,@args)=@_;
+    if ($after_quit) {
+	print STDERR "error message during shutdown:\n",
+	"  $msg\n",
+	map {
+	    "  $_\n"
+	} @args;
+    } else {
+	my $dlg= Gtk3::MessageDialog->new
+	  (undef, # GtkWindow *parent
+	   "modal", # "destroy_with_parent", # GtkDialogFlags flags
+	   "error", # GtkMessageType type -- expecting: info /
+		    # GTK_MESSAGE_INFO, warning / GTK_MESSAGE_WARNING,
+		    # question / GTK_MESSAGE_QUESTION, error /
+		    # GTK_MESSAGE_ERROR, other / GTK_MESSAGE_OTHER
+	   "close", # GtkButtonsType buttons
+	   # const gchar *message_format, ...
+	   "",
+	  );
+	$dlg->set_markup('<b>'.xmlquote($msg).'</b>'."\n\n"
+			 .join("\n\n", map {xmlquote $_} @args));
+	$dlg->set_title("$myname error");
+	$dlg->set_resizable(1);
+	$dlg->run;
+	$dlg->destroy;
+    }
+}
+
+sub maybe_result2error($);
+*maybe_result2error= make_maybe_result2error(\&error);
+sub result2error ($) {
+    my ($result)=@_;
+    defined $result or error "Bug (result2error): expected result, got nothing";
+    maybe_result2error $result;
+}
+
+sub config_save () {
+    my $tmp= $configpath.".tmp";
+    # make file private:
+    xsysopen ($tmp, O_CREAT, 0600);
+    # actually write it:
+    if (DumpFile $tmp, $config) {
+	xrename $tmp, $configpath
+    } else {
+	error "could not write config file", "$!", $configpath
+    }
+}
+
+sub config_set ($$) {
+    my ($key,$val)=@_;
+    exists $$config{$key} or die "wrong config key '$key'";
+    $$config{$key}= $val;
+    config_save;
+}
+
+our $statusbar = get "statusbar";
+our $last_context_id;
+sub status {
+    my ($text)= @_;
+    $statusbar->pop($last_context_id)
+	if defined $last_context_id;
+    our $context_id=
+      $statusbar->get_context_id('$context_description');
+    # WHAT IS THIS EVEN.
+    $last_context_id= $statusbar->push($context_id, $text);
+}
+
+
+our $tapename_entry = get "tapename_entry";
+our $tapename_clear= get 'tapename_clear';
+our $start_button = get 'button_start';
+our $stop_button = get 'button_stop';
+our $video_field= get 'video';
+our $show_button= get 'button_show';
+
+sub tapename_entry_action {
+    update_start_button
+	(defined maybe_valid_tapename_entry_text()
+	 ? "tapename_good"
+	 : "tapename_bad");
+}
+signal_set($tapename_entry,
+	   on_change=> \&tapename_entry_action);
+
+sub status_tapename {
+    status "please enter tape name";
+}
+
+our $status= UIProcess {
+    my ($msg)=@_;
+    status $msg;
+};
+
+sub Perhaps_change_to ($$$) {
+    my ($varref, $val, $changeproc)=@_;
+    # XX just for integers for now. could use my equal.
+    if ($$varref != $val) {
+	$$varref= $val;
+	warn "Perhaps_change_to: change for $varref $val $changeproc"
+	    if $verbose;
+	&$changeproc()
+    }
+}
+
+# update_start_button can be called frequently, it will only update UI
+# when necessary.
+our $start_button_is_stopped=0;
+our $start_button_asks_tapename=0;
+our $start_button_tooltip_text_normal = $start_button->get_tooltip_text;
+sub update_start_button ($) {
+    my ($change_to)=@_;
+    my $action= +{
+	stopped=> sub {
+	    Perhaps_change_to
+		(\$start_button_is_stopped,1, sub {
+		    $start_button->set_sensitive(1)
+			unless $start_button_asks_tapename;
+		 });
+	},
+	recording=> sub {
+	    # turn off asks_tapename, too? Or rely on it done already.
+	    Perhaps_change_to
+		(\$start_button_is_stopped,0, sub {
+		    # (BTW update_start_button won't refuse an update!
+		    # The check for tapename must have been done
+		    # before already)
+		    $start_button->set_sensitive(0);
+			#unless $start_button_asks_tapename;
+		 });
+	},
+	tapename_good=> sub {
+	    Perhaps_change_to
+		(\$start_button_asks_tapename,0, sub {
+		    $start_button->set_tooltip_text
+			(#"start recording"
+			 $start_button_tooltip_text_normal);
+		    $start_button->set_sensitive(1)
+			if $start_button_is_stopped;
+		 });
+	},
+	tapename_bad=> sub {
+	    Perhaps_change_to
+		(\$start_button_asks_tapename,1, sub {
+		    $start_button->set_tooltip_text("Start recording. Please first enter a tape name into the above field!");
+		    $start_button->set_sensitive(0)
+			if $start_button_is_stopped; # otherwise already at 0
+		 });
+	},
+    }->{$change_to} or die "invalid argument";
+    &$action();
+}
+
+
+sub xxINTlogsystem_mplayer {
+    my ($logfh, @args)=@_;
+    my ($w,$h)= $video_field->get_size_request;
+    my @cmd =
+      ("mplayer",
+       "-slave",
+       "-wid", $video_field->get_id,
+       "-geometry", $w."x".$h,
+       "-quiet",
+       @args
+      );
+    xxINTlogsystem ($logfh, 1, \@cmd);
+    # when exception, the carer will clean it up (perhaps); otherwise, we do:
+    # XX config option?
+    unlink $logfh->path;
+}
+
+
+# on the monkey -- XX remove as there are only processes now, no futures?
+sub Chj::Process::stop {
+    my $s=shift;
+    $s->kill;
+}
+
+sub Stop ($) {
+    my ($maybe_future)=@_;
+    if ($maybe_future) {
+	$maybe_future->stop;
+	undef $_[0]; # hacky?
+    }
+}
+
+our $uuid2then;
+sub push_then ($$) {
+    my ($process,$cont)=@_;
+    my $uuid= $process->uuid;
+    push @{ $$uuid2then{ $uuid } }, $cont;
+}
+sub maybe_pop_then ($) {
+    my ($process)=@_;
+    my $uuid= $process->uuid;
+    if (my $then= $$uuid2then{ $uuid }) {
+	my $cont= pop @$then;
+	delete $$uuid2then{ $uuid } unless @$then;
+	$cont
+    } else {
+	()
+    }
+}
+
+sub Stop_then ($$) {
+    my ($maybe_process, $cont)=@_;
+    if ($maybe_process) {
+	push_then $maybe_process, $cont;
+	# XX also add a timeout event, so as to check with "kill 0"
+	# whether still around?
+	$maybe_process->stop;
+	undef $_[0]; # hacky?
+    } else {
+	@_=(); goto $cont
+    }
+}
+
+our $collector= UIProcess {
+    my ($result)= @_;
+    result2error $result;
+    if (my $then= maybe_pop_then ($result->sender)) {
+	@_=(); goto $then; # ok? context is from C call, thus no TCO anyway..
+    }
+};
+
+# video
+our $mencoder;
+our $mplayer; # video echo *or* playback process
+# sound
+our $soundrecorder;
+#our $aplay; # sound echo *or* playback process
+# nope, need to differentiate for check in redo_settings sigh.
+our $aplay_echo;
+our $aplay_playback;
+our $aplay_test;
+
+our $statusupdater;
+
+use Time::HiRes qw(time sleep);
+
+#use  linked list  sGH
+sub sec2str {
+    my ($t,$secs)=@_;
+    my $secs2=[@$secs];
+    my $scs= pop @$secs2;
+    defined $scs or return "$t:";
+    use integer;
+    my $higher= $t / $scs;
+    my $lower= $t % $scs;
+    ($higher ? sec2str($higher, $secs2) : "") . sprintf('%02i:', $lower);
+}
+
+sub t2hms {
+    my ($t)=@_;
+    my $str= sec2str($t, [24,#hour/day
+			  60,#min/hour
+			  60,#sec/min
+			 ]);
+    substr $str, 0, length($str)-1
+}
+
+#use Chj::repl;repl;exit;
+
+sub maybe_valid_tapename_entry_text {
+    my $tapename= chompspace $tapename_entry->get_text;
+    if (length $tapename) {
+	$tapename
+    } else {
+	undef
+    }
+}
+
+sub do_start {
+    $tapename_entry->set_editable(0); # avoid race condition (well)
+    if (defined (my $tapename = maybe_valid_tapename_entry_text)) {
+	my ($nameplus, $videopath, $audiopath)= filepaths $tapename;
+
+	# kill video and sound echo processs
+	Stop_then $mplayer, sub {
+	    Stop_then $aplay_echo, sub {
+
+		# start recorder processes
+
+		$mencoder= Process {
+		    psname "mencoder";
+		    my $log= logfh "mencoder";
+		    xxINTlogsystem($log,
+				   1,
+				   [templated_config
+				    "mencoder_cmd",
+				    +{VIDEODEV=> config ("videodev"),
+				      SIZE=> "", # XXX
+				      AUDIOINPUTDEV=> config ("audiodev_input"),
+				      VIDEOPATH=> $videopath}]);
+		    unlink $log->path; # XX config?
+		} $collector;
+
+		start_soundrecorder ($audiopath);
+
+		$statusupdater= Process {
+		    psname "statusupdater";
+		    my $start= time; # hires!
+		    my $lastd=-1; # last shown diff, integer
+		    while (1) {
+			my $t= time;
+			my $d= int( $t - $start );
+			if ($d != $lastd) {
+			    $lastd=$d;
+			    $status->send
+				("recording ".t2hms ($d)." '$nameplus'");
+			}
+			sleep 0.2;
+		    }
+		} $collector;
+
+		# start delayed play processes
+
+		$mplayer= Process {
+		    psname "delayed-mplayer";
+		    sleep $playback_delay;
+		    xxINTlogsystem_mplayer
+			(logfh "mplayer_playback",
+			 templated_config
+			 ("mplayer_playback_opts",
+			  +{VIDEOPATH=> $videopath}));
+		} $collector;
+
+		$aplay_playback= pipe2_Process
+		    (sub {
+			sleep $playback_delay; # - 0.1 or so?
+		     },
+		     "playback_oggdec",
+		     [DBG
+		      "ogg123", "-d", "wav", "-f", "-", $audiopath
+		     ],
+		     "playback_aplay",
+		     # COPY from start_sound_echo
+		     [DBG
+		      "aplay", "-D", config("audiodev_output")]);
+
+		#$status_recording_filename= $nameplus; ah in scope of thread proc anyway above
+		$status->send ("recording '$nameplus'"); # afterwards updated through sep thread
+		$tapename_entry->set_sensitive(0);
+		$tapename_clear->set_sensitive(0);
+		update_start_button ("recording");
+		#use Chj::repl;repl;
+		$stop_button->set_sensitive(1);
+	    }
+	};
+
+    } else {
+	$tapename_entry->set_editable(1);
+	status_tapename;
+    }
+}
+
+sub start_video_echo {
+    $mplayer= Process {
+	psname "start_video_echo";
+	xxINTlogsystem_mplayer
+	    (logfh "mplayer_direct",
+	     templated_config
+	     ("mplayer_direct_opts",
+	      +{VIDEODEV=> config("videodev")}));
+    } $collector;
+}
+
+
+use Chj::xpipe;
+use POSIX 'SIGINT';
+
+sub pipe2_Process ($$$$$) {
+    my ($prethunk, $logname1, $cmd1, $logname2, $cmd2)=@_;
+    Process {
+	psname "pipe2_Process-$$cmd1[0]-$$cmd2[0]";
+	&$prethunk;
+	my ($r,$w)= xpipe;
+	my $record;
+	my $play;
+	local $SIG{INT}= sub {
+	    kill SIGINT, $record if defined $record;
+	    kill SIGINT, $play if defined $play;
+	};
+	if ($record= xfork) {
+	    if ($play= xfork) {
+		# no need for xxwaitpid as the subprocesses are
+		# sending their errors directly
+		xwaitpid $record;
+		xwaitpid $play;
+	    } else {
+		$w->xclose;
+		$r->xdup2 (0);
+		xxINTlogsystem (logfh $logname2,
+				1,
+				$cmd2);
+		exit 0;
+	    }
+	} else {
+	    $r->xclose;
+	    $w->xdup2 (1);
+	    xxINTlogsystem (logfh $logname1,
+			    0,
+			    $cmd1);
+	    exit 0;
+	}
+    } $collector;
+}
+
+sub start_sound_echo {
+    $aplay_echo= pipe2_Process
+	(sub { },
+	 "sound_echo_arecord",
+	 [DBG
+	  "arecord", "-D", config("audiodev_input"), "-t", "wav",
+	  "-c", "2", # ok ? ? XX config?
+	  "-f", "cd", # XXX hmmmmm? config
+	 ],
+	 "sound_echo_aplay",
+	 [DBG
+	  "aplay", "-D", config("audiodev_output")]);
+}
+
+sub start_soundrecorder ($) {
+    my ($path)=@_;
+    $soundrecorder= pipe2_Process
+	(sub { },
+	 "soundrecorder_arecord",
+	 [DBG
+	  "arecord", "-D", config("audiodev_input"), "-t", "wav",
+	  "-c", "2", # ok ? ? XX config?
+	  "-f", "cd", # XXX hmmmmm? config
+	 ],
+	 "soundrecorder_oggenc",
+	 [DBG
+	  "oggenc", "-o", $path, "-"]);
+}
+
+
+sub make_restart {
+    my ($varref, $start)=@_;
+    sub {
+	my ($maybe_cfg)=@_;
+	Stop $$varref;
+	if ($maybe_cfg) {
+	    warn "YAY tmp config";
+	    local $config= $maybe_cfg;
+	    &$start ();
+	} else {
+	    &$start ();
+	}
+    }
+}
+
+sub restart_video_echo;
+*restart_video_echo= make_restart (\$mplayer, \&start_video_echo);
+sub restart_sound_echo;
+*restart_sound_echo= make_restart (\$aplay_echo, \&start_sound_echo);
+
+
+sub do_stop {
+    # stop recorders and playback
+    Stop_then $mencoder, sub {
+	Stop_then $soundrecorder, sub {
+	    Stop_then $mplayer, sub {
+		Stop_then $aplay_playback, sub {
+
+		    Stop $statusupdater;
+
+		    start_video_echo;
+		    start_sound_echo;
+
+		    status "stopped";
+		    $tapename_clear->set_sensitive(1);
+		    $tapename_entry->set_sensitive(1);
+		    $tapename_entry->set_editable(1);
+		    update_start_button ("stopped");
+		    $stop_button->set_sensitive(0);
+		}
+	    }
+	}
+    }
+}
+
+sub do_quit {
+    # do this *before* closing windows, necessary?
+    Stop $mplayer;
+    # do rest here, too, anyway
+    Stop $mencoder;
+    Stop $soundrecorder;
+    Stop $aplay_echo;
+    Stop $aplay_playback;
+    Stop $aplay_test;
+    Stop $statusupdater;
+
+    $after_quit=1;
+    Gtk3::main_quit;
+}
+
+sub do_about {
+    my $about= get "aboutdialog1";
+    my $escapeddir= singlequote_sh $mydir;
+    my $version= `cd $escapeddir && git describe --always`;
+    $about->set_version($version);
+    $about->run;
+    $about->set_visible(0);
+}
+
+# purely my choices
+sub CANCEL() { 10 }
+sub OK() { 12 }
+sub REVERT() { 9 }
+sub REVERT_DEFAULTS() { 8 }
+
+sub ask_location {
+    local our $chooser= get "filechooserdialog1";
+    my $ask_location;
+  ASK: {
+	my $res= $chooser->run;
+	if ($res == OK) {
+	    if (defined (my $path= $chooser->get_filename)) {
+		if (-d $path) {
+		    $ask_location= $path;
+		} else {
+		    error "Choosen path does not point to a directory", $path;
+		    # heh that we set visibility of $chooser to 0 only
+		    # later on might actually be a good thing; or even:
+		    # continue to use it!
+		    redo ASK;
+		}
+	    } else {
+		error "You haven't chosen any location.",
+		  "If you don't want to choose anything, press cancel instead.";
+		redo ASK;
+	    }
+	} else {
+	    warn "location cancel" if $verbose;
+	}
+	$chooser->set_visible(0);
+    }
+    $ask_location
+}
+
+sub do_location {
+    if (defined (my $path= ask_location)) {
+	config_set("basedir", $path);
+    }
+}
+
+our $settings_button_location= get('settings_button_location');
+our $settings_button_play_sound= get('settings_button_play_sound');
+our $settings_button_play_sound__label_normal = $settings_button_play_sound->get_label;
+our $settings_button_play_sound__label_stop   = "         Stop         ";
+our $settings_button_reroute_sound= get 'settings_button_reroute_sound';
+our $settings_button_reroute_video= get 'settings_button_reroute_video';
+
+our $do_settings__cfg; # in UI thread, set/maintained by do_settings
+
+signal_set ($settings_button_reroute_sound,
+	    clicked=> sub {
+		get_input_fields();
+		restart_sound_echo ($do_settings__cfg);
+	    });
+signal_set ($settings_button_reroute_video,
+	    clicked=> sub {
+		get_input_fields();
+		restart_video_echo ($do_settings__cfg);
+	    });
+
+our ($settings_button_play_sound__to_normal, $settings_button_play_sound__to_stop);
+
+$settings_button_play_sound__to_normal= UIProcess {
+    my ($maybe_result)= @_;
+    maybe_result2error $maybe_result;
+    $settings_button_play_sound->set_label($settings_button_play_sound__label_normal);
+    start_sound_echo
+	# unless already running, or recording
+	unless ($aplay_echo or $aplay_playback);
+    signal_set
+	($settings_button_play_sound,
+	 clicked => sub {
+	     get_audiodev_output();
+	     Stop $aplay_echo;
+	     Stop $aplay_test; # should never happen, though.
+	     $aplay_test= Process {
+		 psname "aplay_test";
+		 $settings_button_play_sound__to_stop->send;
+		 xxINTlogsystem(logfh "aplay",
+				1,
+				[DBG
+				 "aplay", "-D", $$do_settings__cfg{audiodev_output},
+				 "--", $mydir."/Media/Slurp.wav"]);
+	     } $settings_button_play_sound__to_normal;
+	 });
+};
+
+$settings_button_play_sound__to_stop= UIProcess {
+    my ($maybe_result)= @_;
+    signal_set($settings_button_play_sound,
+	       clicked => sub {
+		   Stop $aplay_test;
+		   # ^ this will also call $settings_button_play_sound__to_normal
+	       });
+    $settings_button_play_sound->set_label($settings_button_play_sound__label_stop);
+};
+
+sub error_undefined ($) {
+    my ($key)=@_;
+    error("The stored settings are missing a value for '$key'",
+	  "I'll use the empty string instead, please set it to something after closing this dialog.");
+}
+
+sub ComboBox {
+    @_==4 or die;
+    my ($cfgkey,$defaults,$connected_hash, $val)=@_;
+    if (!defined $val) {
+	error_undefined $cfgkey;
+	$val="";
+    }
+    my $guikey= $cfgkey."_combobox";
+    my $cb= get $guikey;
+    $cb->remove_all;
+    my $alldevs=
+      +{
+	map { $_=> 1} keys (%$connected_hash), @$defaults, $val
+       };
+    my $i=0;
+    for my $dev (sort keys %$alldevs) {
+	my $maybe_name= $$connected_hash{$dev};
+	my $desc= $maybe_name ? "$dev ($maybe_name)" : $dev;
+	$cb->append($i++,$desc);
+    }
+    # add editable/selected entry
+    my $entry= $cb->get_child;
+    $entry->set_text($val);
+    bless { cb=> $cb,
+	    key=> $cfgkey }, "PFLANZE::ComboBox";
+}
+
+{
+    package PFLANZE::ComboBox;
+    sub get_text_part1 {
+	@_==2 or die;
+	my ($s,$on_err)=@_;
+	my $val= $$s{cb}->get_active_text;
+	my ($val_field1)= $val=~ m|^\s*(\S+)|
+	  or do {
+	      main::error( "Field '$$s{key}' is empty",
+			   "please choose an entry from the menu" );
+	      @_=(); goto $on_err;
+	  };
+	$val_field1
+    }
+}
+
+our $do_settings__dlg= get "dialog_settings";
+
+our ($videodev_combobox, $audiodev_input_combobox, $audiodev_output_combobox);
+
+sub get_audiodev_output {
+    $$do_settings__cfg{audiodev_output} = $audiodev_output_combobox->get_text_part1
+	(\&redo_settings);
+}
+
+sub get_input_fields {
+    # get input fields
+    my $get_input= sub {
+	my ($name)=@_;
+	my $widget= get $name;
+	$$do_settings__cfg{$name}= $widget->get_text;
+    };
+    &$get_input ("mplayer_direct_opts");
+    &$get_input ("mplayer_playback_opts");
+    &$get_input ("mencoder_cmd");
+    
+    $$do_settings__cfg{videodev} = $videodev_combobox->get_text_part1
+	(\&redo_settings);
+    $$do_settings__cfg{audiodev_input} = $audiodev_input_combobox->get_text_part1
+	(\&redo_settings);
+    get_audiodev_output;
+}
+
+sub redo_settings {
+    my $set_location_button= sub {
+	   $settings_button_location->set_label($$do_settings__cfg{"basedir"});
+    };
+    signal_set($settings_button_location,
+	       clicked=> sub {
+		   if (defined (my $path= ask_location)) {
+		       $$do_settings__cfg{"basedir"}= $path;
+		       &$set_location_button;
+		   }
+	       });
+    &$set_location_button;
+
+    # set popup menues
+    $videodev_combobox=
+	 ComboBox ("videodev", \@videodevs,
+		   get_v4ldevices, $$do_settings__cfg{videodev});
+    $audiodev_input_combobox=
+	 ComboBox ("audiodev_input", \@audiodevs_input,
+		   get_audio_devices(0), $$do_settings__cfg{audiodev_input});
+    $audiodev_output_combobox=
+	 ComboBox ("audiodev_output", \@audiodevs_output,
+		   get_audio_devices(1), $$do_settings__cfg{audiodev_output});
+
+    # set input fields
+    my $set_input= sub {
+	   my ($name)=@_;
+	   my $val= $$do_settings__cfg{$name};
+	   if (! defined $val) {
+	       error_undefined $name;
+	       $val="";
+	   }
+	   my $widget= get $name;
+	   #set_visible(1)
+	   $widget->set_text($val);
+    };
+    &$set_input ("mplayer_direct_opts");
+    &$set_input ("mplayer_playback_opts");
+    &$set_input ("mencoder_cmd");
+
+    $settings_button_play_sound__to_normal->send;
+
+    my $perhaps_restart_echos= sub {
+	if ($aplay_playback) {
+	    # don't restart, we're recording
+	} else {
+	    restart_video_echo;
+	    restart_sound_echo;
+	}
+    };
+    
+    my $res= $do_settings__dlg->run;
+    if ($res == OK) {
+	get_input_fields;
+
+	$do_settings__dlg->set_visible (0);
+	# 'commit'
+	$config= $do_settings__cfg;
+	config_save;
+	# restart echo with new settings:
+	&$perhaps_restart_echos;
+    } elsif ($res == REVERT_DEFAULTS) {
+	$do_settings__cfg= +{ %$default_config };
+	goto \&redo_settings;
+    } elsif ($res == REVERT) {
+	goto \&do_settings;
+    } else {
+	warn "settings cancelled" if $verbose;
+	$do_settings__dlg->set_visible (0);
+	# restart echo with old settings (stopping "try" stuff):
+	&$perhaps_restart_echos;
+	# ^ XX only if there were any changes? but can't even just
+	# compare $cfg since it may have been different when hitting
+	# Try; thus save the config of the last Try? Hm, pure
+	# functions, I mean, only re-run the function if it has
+	# changed. Well, FRP?
+    }
+    Stop $aplay_test;
+}
+
+sub do_settings {
+    $do_settings__cfg= +{ %$config };
+    goto \&redo_settings;
+}
+
+sub do_show {
+    xspawn "xdg-open", config "basedir";
+}
+
+
+
+{
+    # connect menu actions
+    for (qw(location quit about settings)) {
+	my $item= get "menu_$_";
+	my $proc= do {
+	    no strict 'refs';
+	    *{"do_$_"}{CODE}
+	};
+	signal_set($item, activate => $proc);
+    }
+}
+
+update_start_button ("stopped");
+update_start_button ("tapename_bad");
+$stop_button->set_sensitive(0);
+status_tapename;
+
+
+signal_set($tapename_clear,
+	   clicked => sub {
+	       $tapename_entry->set_text("");
+	       $tapename_entry->grab_focus;
+	       tapename_entry_action;
+	   });
+
+signal_set($start_button, clicked => \&do_start);
+signal_set($stop_button, clicked => \&do_stop);
+signal_set($show_button, clicked => \&do_show);
+
+our $window1= get "window1";
+signal_set($window1, "delete-event"=> \&do_quit);
+$window1->show_all;
+
+start_video_echo;
+start_sound_echo;
+#for(1..5){sleep 1};
+#^ ok, still works that way even though appearance of the window is
+#  delayed, interesting.
+
+$tapename_entry->grab_focus;
+
+use Chj::Backtrace;
+#use Chj::repl; repl;
+Gtk3->main;
+killall;
+
+# $status->end; now unnecessary or bad as it's an UIProcess now
+

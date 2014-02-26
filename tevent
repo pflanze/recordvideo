@@ -1,0 +1,92 @@
+#!/usr/bin/perl -w
+
+# Sun Feb 16 22:40:20 GMT 2014
+(my $email='ch%christianjaeger,ch')=~ tr/%,/@./;
+
+use strict;
+
+$0=~ /(.*?)([^\/]+)\z/s or die "?";
+my ($mydir, $myname)=($1,$2);
+sub usage {
+    print STDERR map{"$_\n"} @_ if @_;
+    print "$myname ..
+
+  test event system
+
+  (Christian Jaeger <$email>)
+";
+exit (@_ ? 1 : 0);
+}
+
+use Getopt::Long;
+our $verbose=0;
+#our $opt_dry;
+GetOptions("verbose"=> \$verbose,
+	   "help"=> sub{usage},
+	   #"dry-run"=> \$opt_dry,
+	   ) or exit 1;
+#usage unless @ARGV;
+
+
+use lib "lib";
+use Chj::xperlfunc ":all";
+use Chj::PClosure;
+use Chj::Processes;
+$SIG{PIPE}= "IGNORE";
+$Chj::Processes::verbose = 1;
+
+our $carer = Process {
+    my ($q)=@_;
+    while (my ($exitmsg)= $q->receive) {
+	use Data::Dumper;
+	print STDERR "carer got: ".Dumper($exitmsg)."\n";
+    }
+};
+
+our $p= Process {
+    my ($q)=@_;
+    while(my (@msg)= $q->receive) {
+	print @msg, "\n"
+    }
+} $carer;
+
+use POSIX qw(setsid SIGTERM);
+our $sessid= setsid; $sessid < 0 and $sessid= $$;
+sub killall {
+    local $SIG{TERM}= "IGNORE"; kill SIGTERM, -$sessid;
+}
+
+our $lph= LocalProcess_handler {
+    my (@msg)= @_;
+    print "local process: ", @msg, "\n"
+} $carer;
+
+our $lp= $lph->process;
+
+use Chj::ruse;use Chj::Backtrace;
+
+#use Chj::repl; repl;
+#exit;
+our $pingsender= Process {
+    while (1) {
+	sleep 3;
+	$lp->send("ping");
+    }
+} $lp;
+
+$lp->send("local ping");
+
+while(1) {
+    $lph->iohandler->()
+}
+
+__END__
+
+main> :d $p->send("Hello World", " and you")
+Hello World and you
+$VAR1 = undef;
+main> :d $lp->send("Hello World", " and you")
+$VAR1 = undef;
+main> :d $lph->iohandler->()
+local process: Hello World and you
+main> 
