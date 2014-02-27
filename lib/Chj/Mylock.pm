@@ -26,14 +26,18 @@ use strict;
 use Chj::xopen 'xopen_write';
 use Chj::xtmpdir;
 
-our $dir=xtmpdir;
-$dir->autoclean(2);
-# don't warn; since used in children, too.  XXX But is it ok to remove
-# there?
+our $dir;
+sub init_dir {
+    $dir=xtmpdir;
+    $dir->autoclean(2);
+    # don't warn; since used in children, too.  XXX But is it ok to
+    # remove there?
+}
 
 our $cnt=0;
 
 sub new_mylock {
+    init_dir unless defined $dir;
     my $p="$dir/$$-".($cnt++);
     xopen_write ($p);
     $p
