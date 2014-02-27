@@ -14,7 +14,7 @@ our $default_config=
     basedir=> "$ENV{HOME}/tmp/RECORDVIDEOTEST", ##
     videodev=> $videodevs[0],
     mplayer_direct_opts=> '-tv device="$VIDEODEV":driver=v4l2 tv://',
-    mplayer_playback_opts=> '"$VIDEOPATH"',
+    mplayer_playback_opts=> '',
     mencoder_cmd=> 'mencoder -quiet tv:// -tv driver=v4l2"$SIZE":device="$VIDEODEV" -ovc lavc=yes -lavcopts vcodec=mpeg4 -nosound -o "$VIDEOPATH" -',
     audiodev_input=> $audiodevs_input[0],
     audiodev_output=> $audiodevs_output[0],
@@ -301,8 +301,8 @@ sub update_start_button ($) {
 }
 
 
-sub xxINTlogsystem_mplayer {
-    my ($logfh, @args)=@_;
+sub mplayer_args {
+    my (@args)=@_;
     my ($w,$h)= $video_field->get_size_request;
     my @cmd =
       ("mplayer",
@@ -312,10 +312,12 @@ sub xxINTlogsystem_mplayer {
        "-quiet",
        @args
       );
-    xxINTlogsystem ($logfh, 1, \@cmd);
-    # when exception, the carer will clean it up (perhaps); otherwise, we do:
-    # XX config option?
-    unlink $logfh->path;
+    \@cmd
+}
+
+sub xxINTlogsystem_mplayer {
+    my ($logfh, @args)=@_;
+    xxINTlogsystem ($logfh, 1, mplayer_args(@args));
 }
 
 
@@ -484,15 +486,20 @@ sub do_start {
 
 		# start delayed play processes
 
-		$mplayer= Process {
-		    psname "delayed-mplayer";
-		    sleep $playback_delay;
-		    xxINTlogsystem_mplayer
-			(logfh "mplayer_playback",
-			 templated_config
-			 ("mplayer_playback_opts",
-			  +{VIDEOPATH=> $videopath}));
-		} $collector;
+		$mplayer= pip2_Process
+		    (sub {
+			psname "delayed-mplayer";
+			sleep $playback_delay;
+		     },
+		     "delayed_mplayer_tail",
+		     [DBG
+		      "tail", "-f", "-c", "20000000", "--", $videopath],
+		     "delayed_mplayer",
+		     [DBG
+		      @{mplayer_args
+			    templated_config
+			    ("mplayer_playback_opts", +{})},
+		      "-"]);
 
 		$aplay_playback= pipe2_Process
 		    (sub {

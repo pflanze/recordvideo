@@ -284,8 +284,8 @@ Variables: "$VIDEODEV", "$AUDIOINPUTDEV", "$VIDEOPATH", "$SIZE"
               <object class="GtkEntry" id="mplayer_playback_opts">
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
-                <property name="tooltip_text" translatable="yes">The options to use for mplayer when playing back during recording (playing the recorded file). The "mplayer" command name and the video path are added automatically.
-Variables: "$VIDEOPATH"
+                <property name="tooltip_text" translatable="yes">The options to use for mplayer when playing back during recording (playing the recorded file). The "mplayer" command name and the "-" path to read from STDIN are added automatically.
+Variables: none
 Bash syntax.
 </property>
                 <property name="hexpand">True</property>
