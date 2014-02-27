@@ -494,8 +494,6 @@ sub do_start {
 			close STDOUT;
 			close STDERR;
 			close STDIN;
-			#$Chj::Recordvideo::Utils::xxINTlogsystem_unlink=0;
-			#warn "WHAT'S UP?";
 		     },
 		     "delayed_mplayer_tail",
 		     [DBG
