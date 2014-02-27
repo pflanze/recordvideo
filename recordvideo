@@ -491,6 +491,9 @@ sub do_start {
 		    (sub {
 			psname "delayed-mplayer";
 			sleep $playback_delay;
+			close STDOUT;
+			close STDERR;
+			close STDIN;
 			#$Chj::Recordvideo::Utils::xxINTlogsystem_unlink=0;
 			#warn "WHAT'S UP?";
 		     },
