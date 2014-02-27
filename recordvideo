@@ -20,7 +20,7 @@ our $default_config=
     audiodev_output=> $audiodevs_output[0],
    };
 
-our $playback_delay= 3; # seconds, XXX config?
+our $playback_delay= 2; # seconds, XXX config?
 
 my ($mydir, $myname);
 BEGIN {
@@ -305,13 +305,14 @@ sub mplayer_args {
     my (@args)=@_;
     my ($w,$h)= $video_field->get_size_request;
     my @cmd =
-      ("mplayer",
-       "-slave",
-       "-wid", $video_field->get_id,
-       "-geometry", $w."x".$h,
-       "-quiet",
-       @args
-      );
+	("mplayer",
+	 # "-slave", nope, makes playback break, for unfinished file I
+	 # guess. Sigh is this all a hack.
+	 "-wid", $video_field->get_id,
+	 "-geometry", $w."x".$h,
+	 "-quiet",
+	 @args
+	);
     \@cmd
 }
 
@@ -486,10 +487,12 @@ sub do_start {
 
 		# start delayed play processes
 
-		$mplayer= pip2_Process
+		$mplayer= pipe2_Process
 		    (sub {
 			psname "delayed-mplayer";
 			sleep $playback_delay;
+			#$Chj::Recordvideo::Utils::xxINTlogsystem_unlink=0;
+			#warn "WHAT'S UP?";
 		     },
 		     "delayed_mplayer_tail",
 		     [DBG
