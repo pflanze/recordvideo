@@ -50,6 +50,7 @@ GetOptions("verbose"=> \$verbose,
 
 $Chj::Processes::verbose = $verbose;
 
+use lib "/opt/chj/perllib";
 use lib "$mydir/lib";
 use Chj::UIProcessor;
 use Chj::Processes;
