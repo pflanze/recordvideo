@@ -4,4 +4,10 @@
  # git clone https://github.com/pflanze/chj-perllib.git perllib
  # cd /opt/chj
  # git clone https://github.com/pflanze/recordvideo.git
+ # apt-get install libyaml-perl libgtk3-perl mplayer2 mencoder alsa-utils vorbis-tools
+
+Then create an Ubuntu style shortcut on your Desktop or whatever, or
+perhaps:
+ 
+ # ln -s /opt/chj/recordvideo/recordvideo /usr/local/bin
 
