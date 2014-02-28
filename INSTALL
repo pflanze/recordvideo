@@ -4,7 +4,10 @@
  # git clone https://github.com/pflanze/chj-perllib.git perllib
  # cd /opt/chj
  # git clone https://github.com/pflanze/recordvideo.git
- # apt-get install libyaml-perl libgtk3-perl mplayer2 mencoder alsa-utils vorbis-tools
+ # apt-get install libyaml-perl libgtk3-perl mplayer mencoder alsa-utils vorbis-tools
+
+Note that we need the mplayer package, not the Ubuntu mplayer2
+package; the latter is said to be outdated and it won't work!
 
 Then create an Ubuntu style shortcut on your Desktop or whatever, or
 perhaps:
