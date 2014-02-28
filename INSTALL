@@ -2,7 +2,6 @@
  $ sudo su -
  # cd /opt; mkdir chj; cd chj
  # git clone https://github.com/pflanze/chj-perllib.git perllib
- # cd /opt/chj
  # git clone https://github.com/pflanze/recordvideo.git
  # apt-get install libyaml-perl libgtk3-perl mplayer mencoder alsa-utils vorbis-tools
 
