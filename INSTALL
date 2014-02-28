@@ -1,0 +1,7 @@
+
+ $ sudo su -
+ # cd /opt; mkdir chj; cd chj
+ # git clone https://github.com/pflanze/chj-perllib.git perllib
+ # cd /opt/chj
+ # git clone https://github.com/pflanze/recordvideo.git
+
