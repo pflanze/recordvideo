@@ -89,7 +89,8 @@ sub config ($) {
 }
 
 sub logbase () {
-    config ("basedir")."/."
+    # config ("basedir")."/." -- not good, if not mounted! Also, autocleaning.
+    "/tmp/"
 }
 
 sub logfh ($) {
