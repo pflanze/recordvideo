@@ -15,7 +15,7 @@ our $default_config=
     videodev=> $videodevs[0],
     mplayer_direct_opts=> '-tv device="$VIDEODEV":driver=v4l2 tv://',
     mplayer_playback_opts=> '',
-    mencoder_cmd=> 'mencoder -quiet tv:// -tv driver=v4l2"$SIZE":device="$VIDEODEV" -ovc lavc=yes -lavcopts vcodec=mpeg4 -nosound -o "$VIDEOPATH" -',
+    mencoder_cmd=> 'mencoder -quiet tv:// -tv driver=v4l2"$SIZE":device="$VIDEODEV" -ovc lavc=yes -lavcopts vcodec=mpeg4 -nosound -o "$VIDEOPATH"',
     audiodev_input=> $audiodevs_input[0],
     audiodev_output=> $audiodevs_output[0],
    };
