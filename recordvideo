@@ -32,7 +32,7 @@ our $default_config=
     audiodev_output=> $audiodevs_output[0],
    };
 
-our $playback_delay= 3; # seconds, XXX config?
+our $playback_delay= 0; # seconds (config?)
 
 my ($mydir, $myname);
 BEGIN {
@@ -81,6 +81,19 @@ use Chj::Recordvideo::Utils;
 use Chj::Recordvideo::Devices;
 
 # -------------
+
+use Time::HiRes qw(time sleep);
+
+sub xpoll_for_file_to_appear ($$) {
+    my ($path,$timeout)=@_;
+    my $start= time;
+    while (not -e $path) {
+	sleep 0.2;
+	if (time - $start > $timeout) {
+	    die "timeout waiting for file to appear: '$path'"
+	}
+    }
+}
 
 sub error;
 
@@ -457,7 +470,7 @@ our $aplay_test;
 
 our $statusupdater;
 
-use Time::HiRes qw(time sleep);
+#use Time::HiRes qw(time sleep);
 
 #use  linked list  sGH
 sub sec2str {
@@ -540,6 +553,7 @@ sub do_start {
 		    (sub {
 			psname "delayed-mplayer";
 			sleep $playback_delay;
+			xpoll_for_file_to_appear $videopath, 10;
 			close STDOUT;
 			close STDERR;
 			close STDIN;
