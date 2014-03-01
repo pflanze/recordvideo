@@ -460,7 +460,8 @@ sub do_start {
 		    my $log= logfh "mencoder";
 		    xxINTlogsystem($log,
 				   1,
-				   [templated_config
+				   [DBG
+				    templated_config
 				    "mencoder_cmd",
 				    +{VIDEODEV=> config ("videodev"),
 				      SIZE=> "", # XXX
