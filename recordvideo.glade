@@ -254,7 +254,7 @@ Variables: "$VIDEODEV"
                 <property name="can_focus">True</property>
                 <property name="tooltip_text" translatable="yes">The command to use for recording.
 Bash syntax (use double quotes to protect from field splitting!).
-Variables: "$VIDEODEV", "$MANGLEDAUDIOINPUTDEV", "$VIDEOPATH", "$SIZE",
+Variables: "$VIDEODEV", "$MANGLEDAUDIOINPUTDEV", "$VIDEOPATH"
   as well as "$AUDIOINPUTDEV", but you need to use "$MANGLEDAUDIOINPUTDEV"
   for mencoder so as to get the necessary mangling of the device string
 </property>

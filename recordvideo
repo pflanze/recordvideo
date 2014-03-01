@@ -18,7 +18,6 @@ our $default_config=
     mplayer_direct_opts=> '-tv device="$VIDEODEV":driver=v4l2 tv://',
     mplayer_playback_opts=> '-ao alsa:device="$MANGLEDAUDIOOUTPUTDEV"',
     mencoder_cmd=>
-	#XX "$SIZE"?
 	join(" ",
 	     'mencoder',
 	     'tv:// -tv driver=v4l2:device="$VIDEODEV":alsa:adevice="$MANGLEDAUDIOINPUTDEV":amode=1:audiorate=48000:forceaudio:immediatemode=0',
@@ -523,7 +522,6 @@ sub do_start {
 				    templated_config
 				    "mencoder_cmd",
 				    +{VIDEODEV=> config ("videodev"),
-				      SIZE=> "", # XXX
 				      AUDIOINPUTDEV=> config ("audiodev_input"),
 				      MANGLEDAUDIOINPUTDEV=>
 					  mangle_dev(config ("audiodev_input")),
