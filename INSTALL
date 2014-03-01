@@ -6,7 +6,8 @@
  # apt-get install libyaml-perl libgtk3-perl mplayer mencoder alsa-utils vorbis-tools
 
 Note that we need the mplayer package, not the Ubuntu mplayer2
-package; the latter is said to be outdated and it won't work!
+package; the latter is said to be a separate (and possibly outdated)
+fork of mplayer and it won't work for recordvideo!
 
 Then create an Ubuntu style shortcut on your Desktop or whatever, or
 perhaps:
