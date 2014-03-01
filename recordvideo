@@ -26,7 +26,7 @@ our $default_config=
 	     '-noskip',
 	     '-of lavf -lavfopts format=avi',
 	     '-oac lavc -lavcopts acodec=libmp3lame:abitrate=320',
-	     '-ovc lavc -lavcopts vcodec=mpeg4:aspect=16/9:vqmin=1:vqmax=4:lmin=1.0:lmax=4.0:mblmin=1.0:mblmax=4.0:vrc_minrate=1:keyint=100:vmax_b_frames=1',
+	     '-ovc lavc -lavcopts vcodec=mpeg4:vqmin=1:vqmax=4:lmin=1.0:lmax=4.0:mblmin=1.0:mblmax=4.0:vrc_minrate=1:keyint=100:vmax_b_frames=1',
 	     '-o "$VIDEOPATH"'),
     audiodev_input=> $audiodevs_input[0],
     audiodev_output=> $audiodevs_output[0],
