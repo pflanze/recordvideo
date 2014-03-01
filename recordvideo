@@ -8,14 +8,26 @@ use strict;
 our @videodevs= map { "/dev/video$_" } (0..3);
 our @audiodevs_input= ("default", map { "hw:$_,0" } (0..3)); # XX: ,0 or ,1?  sigh
 our @audiodevs_output= ("default", map { "hw:$_,0" } (0..3));
+our $videosuffix= ".video"; # XX config?
+our $audiosuffix= ".ogg";
 
 our $default_config=
   +{
     basedir=> "$ENV{HOME}/tmp/RECORDVIDEOTEST", ##
     videodev=> $videodevs[0],
     mplayer_direct_opts=> '-tv device="$VIDEODEV":driver=v4l2 tv://',
-    mplayer_playback_opts=> '',
-    mencoder_cmd=> 'mencoder -quiet tv:// -tv driver=v4l2"$SIZE":device="$VIDEODEV" -ovc lavc=yes -lavcopts vcodec=mpeg4 -nosound -o "$VIDEOPATH"',
+    mplayer_playback_opts=> '-ao alsa:device="$MANGLEDAUDIOOUTPUTDEV"',
+    mencoder_cmd=>
+	#XX "$SIZE"?
+	join(" ",
+	     'mencoder',
+	     'tv:// -tv driver=v4l2:device="$VIDEODEV":alsa:adevice="$MANGLEDAUDIOINPUTDEV":amode=1:audiorate=48000:forceaudio:immediatemode=0',
+	     '-quiet',
+	     '-noskip',
+	     '-of lavf -lavfopts format=avi',
+	     '-oac lavc -lavcopts acodec=libmp3lame:abitrate=320',
+	     '-ovc lavc -lavcopts vcodec=mpeg4:aspect=16/9:vqmin=1:vqmax=4:lmin=1.0:lmax=4.0:mblmin=1.0:mblmax=4.0:vrc_minrate=1:keyint=100:vmax_b_frames=1',
+	     '-o "$VIDEOPATH"'),
     audiodev_input=> $audiodevs_input[0],
     audiodev_output=> $audiodevs_output[0],
    };
@@ -69,6 +81,15 @@ use Chj::Recordvideo::Utils;
 use Chj::Recordvideo::Devices;
 
 # -------------
+
+sub mangle_dev ($) {
+    my ($str)=@_;
+    # turn hw:0,0 into hw.0,0 -- huh man page: hw=0.3
+    #$str=~ s/:/./sg;
+    $str=~ tr/:,/=./;
+    $str
+}
+
 sub psname ($) {
     my ($name)= @_;
     $0= "recordvideo $name";
@@ -133,8 +154,8 @@ sub filepaths ($) {
     my $num= $highest_num+1;
     my $b= $basepath . $num;
     ($tapename . "-" . $num,
-     $b . ".dvd",
-     $b . ".ogg")
+     $b . $videosuffix,
+     $b . $audiosuffix)
 }
 
 our $builder= new Gtk3::Builder;
@@ -254,6 +275,8 @@ sub Perhaps_change_to ($$$) {
     }
 }
 
+our $is_recording=0; # boolean
+
 # update_start_button can be called frequently, it will only update UI
 # when necessary.
 our $start_button_is_stopped=0;
@@ -263,6 +286,7 @@ sub update_start_button ($) {
     my ($change_to)=@_;
     my $action= +{
 	stopped=> sub {
+	    $is_recording=1; # hacky to do this here?
 	    Perhaps_change_to
 		(\$start_button_is_stopped,1, sub {
 		    $start_button->set_sensitive(1)
@@ -270,6 +294,7 @@ sub update_start_button ($) {
 		 });
 	},
 	recording=> sub {
+	    $is_recording=1; # hacky to do this here?
 	    # turn off asks_tapename, too? Or rely on it done already.
 	    Perhaps_change_to
 		(\$start_button_is_stopped,0, sub {
@@ -397,15 +422,9 @@ our $collector= UIProcess {
     }
 };
 
-# video
 our $mencoder;
 our $mplayer; # video echo *or* playback process
-# sound
-our $soundrecorder;
-#our $aplay; # sound echo *or* playback process
-# nope, need to differentiate for check in redo_settings sigh.
 our $aplay_echo;
-our $aplay_playback;
 our $aplay_test;
 
 our $statusupdater;
@@ -453,8 +472,7 @@ sub do_start {
 	Stop_then $mplayer, sub {
 	    Stop_then $aplay_echo, sub {
 
-		# start recorder processes
-
+		# start recorder process
 		$mencoder= Process {
 		    psname "mencoder";
 		    my $log= logfh "mencoder";
@@ -466,11 +484,11 @@ sub do_start {
 				    +{VIDEODEV=> config ("videodev"),
 				      SIZE=> "", # XXX
 				      AUDIOINPUTDEV=> config ("audiodev_input"),
+				      MANGLEDAUDIOINPUTDEV=>
+					  mangle_dev(config ("audiodev_input")),
 				      VIDEOPATH=> $videopath}]);
 		    unlink $log->path; # XX config?
 		} $collector;
-
-		start_soundrecorder ($audiopath);
 
 		$statusupdater= Process {
 		    psname "statusupdater";
@@ -505,21 +523,14 @@ sub do_start {
 		     [DBG
 		      @{mplayer_args
 			    templated_config
-			    ("mplayer_playback_opts", +{})},
+			    ("mplayer_playback_opts",
+			     +{
+				 MANGLEDAUDIOOUTPUTDEV=>
+				     mangle_dev(config ("audiodev_output")),
+				 AUDIOOUTPUTDEV=>
+				     config ("audiodev_output"),
+			     })},
 		      "-"]);
-
-		$aplay_playback= pipe2_Process
-		    (sub {
-			sleep $playback_delay; # - 0.1 or so?
-		     },
-		     "playback_oggdec",
-		     [DBG
-		      "ogg123", "-d", "wav", "-f", "-", $audiopath
-		     ],
-		     "playback_aplay",
-		     # COPY from start_sound_echo
-		     [DBG
-		      "aplay", "-D", config("audiodev_output")]);
 
 		#$status_recording_filename= $nameplus; ah in scope of thread proc anyway above
 		$status->send ("recording '$nameplus'"); # afterwards updated through sep thread
@@ -603,22 +614,6 @@ sub start_sound_echo {
 	  "aplay", "-D", config("audiodev_output")]);
 }
 
-sub start_soundrecorder ($) {
-    my ($path)=@_;
-    $soundrecorder= pipe2_Process
-	(sub { },
-	 "soundrecorder_arecord",
-	 [DBG
-	  "arecord", "-D", config("audiodev_input"), "-t", "wav",
-	  "-c", "2", # ok ? ? XX config?
-	  "-f", "cd", # XXX hmmmmm? config
-	 ],
-	 "soundrecorder_oggenc",
-	 [DBG
-	  "oggenc", "-o", $path, "-"]);
-}
-
-
 sub make_restart {
     my ($varref, $start)=@_;
     sub {
@@ -643,23 +638,18 @@ sub restart_sound_echo;
 sub do_stop {
     # stop recorders and playback
     Stop_then $mencoder, sub {
-	Stop_then $soundrecorder, sub {
-	    Stop_then $mplayer, sub {
-		Stop_then $aplay_playback, sub {
-
-		    Stop $statusupdater;
-
-		    start_video_echo;
-		    start_sound_echo;
-
-		    status "stopped";
-		    $tapename_clear->set_sensitive(1);
-		    $tapename_entry->set_sensitive(1);
-		    $tapename_entry->set_editable(1);
-		    update_start_button ("stopped");
-		    $stop_button->set_sensitive(0);
-		}
-	    }
+	Stop_then $mplayer, sub {
+	    Stop $statusupdater;
+	    
+	    start_video_echo;
+	    start_sound_echo;
+	    
+	    status "stopped";
+	    $tapename_clear->set_sensitive(1);
+	    $tapename_entry->set_sensitive(1);
+	    $tapename_entry->set_editable(1);
+	    update_start_button ("stopped");
+	    $stop_button->set_sensitive(0);
 	}
     }
 }
@@ -669,9 +659,7 @@ sub do_quit {
     Stop $mplayer;
     # do rest here, too, anyway
     Stop $mencoder;
-    Stop $soundrecorder;
     Stop $aplay_echo;
-    Stop $aplay_playback;
     Stop $aplay_test;
     Stop $statusupdater;
 
@@ -757,7 +745,7 @@ $settings_button_play_sound__to_normal= UIProcess {
     $settings_button_play_sound->set_label($settings_button_play_sound__label_normal);
     start_sound_echo
 	# unless already running, or recording
-	unless ($aplay_echo or $aplay_playback);
+	unless ($aplay_echo or $is_recording);
     signal_set
 	($settings_button_play_sound,
 	 clicked => sub {
@@ -905,9 +893,7 @@ sub redo_settings {
     $settings_button_play_sound__to_normal->send;
 
     my $perhaps_restart_echos= sub {
-	if ($aplay_playback) {
-	    # don't restart, we're recording
-	} else {
+	unless ($is_recording) {
 	    restart_video_echo;
 	    restart_sound_echo;
 	}

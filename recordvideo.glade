@@ -254,7 +254,9 @@ Variables: "$VIDEODEV"
                 <property name="can_focus">True</property>
                 <property name="tooltip_text" translatable="yes">The command to use for recording.
 Bash syntax (use double quotes to protect from field splitting!).
-Variables: "$VIDEODEV", "$AUDIOINPUTDEV", "$VIDEOPATH", "$SIZE"
+Variables: "$VIDEODEV", "$MANGLEDAUDIOINPUTDEV", "$VIDEOPATH", "$SIZE",
+  as well as "$AUDIOINPUTDEV", but you need to use "$MANGLEDAUDIOINPUTDEV"
+  for mencoder so as to get the necessary mangling of the device string
 </property>
                 <property name="hexpand">True</property>
                 <property name="invisible_char">●</property>
@@ -285,7 +287,10 @@ Variables: "$VIDEODEV", "$AUDIOINPUTDEV", "$VIDEOPATH", "$SIZE"
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
                 <property name="tooltip_text" translatable="yes">The options to use for mplayer when playing back during recording (playing the recorded file). The "mplayer" command name and the "-" path to read from STDIN are added automatically.
-Variables: none
+Variables: "$MANGLEDAUDIOOUTPUTDEV"
+   as well as "$AUDIOOUTPUTDEV", but you need to use "$MANGLEDAUDIOOUTPUTDEV"
+   for mplayer so as to get the correctly mangled string
+
 Bash syntax.
 </property>
                 <property name="hexpand">True</property>
