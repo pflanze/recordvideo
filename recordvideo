@@ -9,19 +9,17 @@ our @videodevs= map { "/dev/video$_" } (0..3);
 our @audiodevs_input= ("default", map { "hw:$_,0" } (0..3)); # XX: ,0 or ,1?  sigh
 our @audiodevs_output= ("default", map { "hw:$_,0" } (0..3));
 our $videosuffix= ".video"; # XX config?
-our $audiosuffix= ".ogg";
 
 our $default_config=
   +{
     basedir=> "$ENV{HOME}/tmp/RECORDVIDEOTEST", ##
     videodev=> $videodevs[0],
-    mplayer_direct_opts=> '-tv device="$VIDEODEV":driver=v4l2 tv://',
     mplayer_playback_opts=> '-ao alsa:device="$MANGLEDAUDIOOUTPUTDEV"',
     mencoder_cmd=>
 	join(" ",
 	     'mencoder',
 	     'tv:// -tv driver=v4l2:device="$VIDEODEV":alsa:adevice="$MANGLEDAUDIOINPUTDEV":amode=1:audiorate=48000:forceaudio:immediatemode=0',
-	     '-quiet',
+	     '-really-quiet', # necessary over -quiet if "-" is to be used for output
 	     '-noskip',
 	     '-of lavf -lavfopts format=avi',
 	     '-oac lavc -lavcopts acodec=libmp3lame:abitrate=320',
@@ -194,8 +192,7 @@ sub filepaths ($) {
     my $num= $highest_num+1;
     my $b= $basepath . $num;
     ($tapename . "-" . $num,
-     $b . $videosuffix,
-     $b . $audiosuffix)
+     $b . $videosuffix)
 }
 
 our $builder= new Gtk3::Builder;
@@ -462,9 +459,12 @@ our $collector= UIProcess {
     }
 };
 
+# recording
 our $mencoder;
-our $mplayer; # video echo *or* playback process
-our $aplay_echo;
+our $mplayer;
+# echo
+our $echo;
+# test
 our $aplay_test;
 
 our $statusupdater;
@@ -503,14 +503,28 @@ sub maybe_valid_tapename_entry_text {
     }
 }
 
+sub delayed_mplayer_cmd () {
+    [DBG
+     @{mplayer_args
+	   templated_config
+	   ("mplayer_playback_opts",
+	    +{
+		MANGLEDAUDIOOUTPUTDEV=>
+		    mangle_dev(config ("audiodev_output")),
+		    AUDIOOUTPUTDEV=>
+		    config ("audiodev_output"),
+	    })},
+     "-"]
+}
+
 sub do_start {
     $tapename_entry->set_editable(0); # avoid race condition (well)
     if (defined (my $tapename = maybe_valid_tapename_entry_text)) {
-	my ($nameplus, $videopath, $audiopath)= filepaths $tapename;
+	my ($nameplus, $videopath)= filepaths $tapename;
 
 	# kill video and sound echo processs
 	Stop_then $mplayer, sub {
-	    Stop_then $aplay_echo, sub {
+	    Stop_then $echo, sub {
 
 		# start recorder process
 		$mencoder= Process {
@@ -560,17 +574,7 @@ sub do_start {
 		     [DBG
 		      "tail", "-f", "-c", "20000000", "--", $videopath],
 		     "delayed_mplayer",
-		     [DBG
-		      @{mplayer_args
-			    templated_config
-			    ("mplayer_playback_opts",
-			     +{
-				 MANGLEDAUDIOOUTPUTDEV=>
-				     mangle_dev(config ("audiodev_output")),
-				 AUDIOOUTPUTDEV=>
-				     config ("audiodev_output"),
-			     })},
-		      "-"]);
+		     delayed_mplayer_cmd);
 
 		#$status_recording_filename= $nameplus; ah in scope of thread proc anyway above
 		$status->send ("recording '$nameplus'"); # afterwards updated through sep thread
@@ -587,18 +591,6 @@ sub do_start {
 	status_tapename;
     }
 }
-
-sub start_video_echo {
-    $mplayer= Process {
-	psname "start_video_echo";
-	xxINTlogsystem_mplayer
-	    (logfh "mplayer_direct",
-	     templated_config
-	     ("mplayer_direct_opts",
-	      +{VIDEODEV=> config("videodev")}));
-    } $collector;
-}
-
 
 use Chj::xpipe;
 use POSIX 'SIGINT';
@@ -640,18 +632,22 @@ sub pipe2_Process ($$$$$) {
     } $collector;
 }
 
-sub start_sound_echo {
-    $aplay_echo= pipe2_Process
-	(sub { },
-	 "sound_echo_arecord",
-	 [DBG
-	  "arecord", "-D", config("audiodev_input"), "-t", "wav",
-	  "-c", "2", # ok ? ? XX config?
-	  "-f", "cd", # XXX hmmmmm? config
-	 ],
-	 "sound_echo_aplay",
-	 [DBG
-	  "aplay", "-D", config("audiodev_output")]);
+sub start_echo {
+    $echo= pipe2_Process
+	( sub {
+	    psname "echo";
+	  },
+	  "echo_mencoder",
+	  [DBG
+	   templated_config
+	   "mencoder_cmd",
+	   +{VIDEODEV=> config ("videodev"),
+	     AUDIOINPUTDEV=> config ("audiodev_input"),
+	     MANGLEDAUDIOINPUTDEV=>
+		 mangle_dev(config ("audiodev_input")),
+		 VIDEOPATH=> "-"}],
+	  "echo_mplayer",
+	  delayed_mplayer_cmd);
 }
 
 sub make_restart {
@@ -669,10 +665,8 @@ sub make_restart {
     }
 }
 
-sub restart_video_echo;
-*restart_video_echo= make_restart (\$mplayer, \&start_video_echo);
-sub restart_sound_echo;
-*restart_sound_echo= make_restart (\$aplay_echo, \&start_sound_echo);
+sub restart_echo;
+*restart_echo= make_restart (\$echo, \&start_echo);
 
 
 sub do_stop {
@@ -681,8 +675,7 @@ sub do_stop {
 	Stop_then $mplayer, sub {
 	    Stop $statusupdater;
 	    
-	    start_video_echo;
-	    start_sound_echo;
+	    start_echo;
 	    
 	    status "stopped";
 	    $tapename_clear->set_sensitive(1);
@@ -699,7 +692,7 @@ sub do_quit {
     Stop $mplayer;
     # do rest here, too, anyway
     Stop $mencoder;
-    Stop $aplay_echo;
+    Stop $echo;
     Stop $aplay_test;
     Stop $statusupdater;
 
@@ -766,15 +759,16 @@ our $settings_button_reroute_video= get 'settings_button_reroute_video';
 
 our $do_settings__cfg; # in UI thread, set/maintained by do_settings
 
+# XX eliminate one of the Try buttons?
 signal_set ($settings_button_reroute_sound,
 	    clicked=> sub {
 		get_input_fields();
-		restart_sound_echo ($do_settings__cfg);
+		restart_echo ($do_settings__cfg);
 	    });
 signal_set ($settings_button_reroute_video,
 	    clicked=> sub {
 		get_input_fields();
-		restart_video_echo ($do_settings__cfg);
+		restart_echo ($do_settings__cfg);
 	    });
 
 our ($settings_button_play_sound__to_normal, $settings_button_play_sound__to_stop);
@@ -783,14 +777,14 @@ $settings_button_play_sound__to_normal= UIProcess {
     my ($maybe_result)= @_;
     maybe_result2error $maybe_result;
     $settings_button_play_sound->set_label($settings_button_play_sound__label_normal);
-    start_sound_echo
+    start_echo
 	# unless already running, or recording
-	unless ($aplay_echo or $is_recording);
+	unless ($echo or $is_recording);
     signal_set
 	($settings_button_play_sound,
 	 clicked => sub {
 	     get_audiodev_output();
-	     Stop $aplay_echo;
+	     Stop $echo; # XX was aplay_echo, does it stop too much now?
 	     Stop $aplay_test; # should never happen, though.
 	     $aplay_test= Process {
 		 psname "aplay_test";
@@ -879,7 +873,6 @@ sub get_input_fields {
 	my $widget= get $name;
 	$$do_settings__cfg{$name}= $widget->get_text;
     };
-    &$get_input ("mplayer_direct_opts");
     &$get_input ("mplayer_playback_opts");
     &$get_input ("mencoder_cmd");
     
@@ -926,16 +919,14 @@ sub redo_settings {
 	   #set_visible(1)
 	   $widget->set_text($val);
     };
-    &$set_input ("mplayer_direct_opts");
     &$set_input ("mplayer_playback_opts");
     &$set_input ("mencoder_cmd");
 
     $settings_button_play_sound__to_normal->send;
 
-    my $perhaps_restart_echos= sub {
+    my $perhaps_restart_echo= sub {
 	unless ($is_recording) {
-	    restart_video_echo;
-	    restart_sound_echo;
+	    restart_echo;
 	}
     };
     
@@ -948,7 +939,7 @@ sub redo_settings {
 	$config= $do_settings__cfg;
 	config_save;
 	# restart echo with new settings:
-	&$perhaps_restart_echos;
+	&$perhaps_restart_echo;
     } elsif ($res == REVERT_DEFAULTS) {
 	$do_settings__cfg= +{ %$default_config };
 	goto \&redo_settings;
@@ -958,7 +949,7 @@ sub redo_settings {
 	warn "settings cancelled" if $verbose;
 	$do_settings__dlg->set_visible (0);
 	# restart echo with old settings (stopping "try" stuff):
-	&$perhaps_restart_echos;
+	&$perhaps_restart_echo;
 	# ^ XX only if there were any changes? but can't even just
 	# compare $cfg since it may have been different when hitting
 	# Try; thus save the config of the last Try? Hm, pure
@@ -1012,8 +1003,7 @@ our $window1= get "window1";
 signal_set($window1, "delete-event"=> \&do_quit);
 $window1->show_all;
 
-start_video_echo;
-start_sound_echo;
+start_echo;
 #for(1..5){sleep 1};
 #^ ok, still works that way even though appearance of the window is
 #  delayed, interesting.
