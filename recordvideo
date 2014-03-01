@@ -82,12 +82,40 @@ use Chj::Recordvideo::Devices;
 
 # -------------
 
+sub error;
+
 sub mangle_dev ($) {
     my ($str)=@_;
+    my $orig=$str;
     # turn hw:0,0 into hw.0,0 -- huh man page: hw=0.3
     #$str=~ s/:/./sg;
-    $str=~ tr/:,/=./;
-    $str
+    #$str=~ tr/:,/=./;
+    # default:CARD=C1100 -> default=CARD.C1100 ?
+    # man mplayer: 'hw=<card>.<device>' 
+    if ($str=~ s/^([^:=]+)//) {
+	my $kind= $1;
+	if ($str=~ s/^[:=]//) {
+	    # there's more
+	    if ($str=~ s/CARD=([^:=]+)//) {
+		my $card = $1;
+		if (length $str) {
+		    error "don't know how to parse '$orig': have a remainder of '$str'";
+		}
+		"$kind=$card"
+	    } else {
+		error "don't know how to parse '$orig': no CARD, but ':'";
+		$str
+	    }
+	} else {
+	    if (length $str) {
+		error "don't know how to parse '$orig'";
+	    }
+	    $kind
+	}
+    } else {
+	error "don't know how to parse '$orig'";
+	$str
+    }
 }
 
 sub psname ($) {
