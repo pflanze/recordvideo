@@ -15,10 +15,12 @@ our $default_config=
     basedir=> "$ENV{HOME}/tmp/RECORDVIDEOTEST", ##
     videodev=> $videodevs[0],
     mplayer_playback_opts=> '-ao alsa:device="$MANGLEDAUDIOOUTPUTDEV"',
+    inputoptions=> 'tv:// -tv driver=v4l2:device="$VIDEODEV":alsa:adevice="$MANGLEDAUDIOINPUTDEV":amode=1:audiorate=48000:forceaudio:immediatemode=0',
+    # ^ XX add preferences field
     mencoder_cmd=>
 	join(" ",
 	     'mencoder',
-	     'tv:// -tv driver=v4l2:device="$VIDEODEV":alsa:adevice="$MANGLEDAUDIOINPUTDEV":amode=1:audiorate=48000:forceaudio:immediatemode=0',
+	     '$INPUTOPTIONS',
 	     '-really-quiet', # necessary over -quiet if "-" is to be used for output
 	     '-noskip',
 	     '-of lavf -lavfopts format=avi',
@@ -526,7 +528,9 @@ sub do_start {
 				      AUDIOINPUTDEV=> config ("audiodev_input"),
 				      MANGLEDAUDIOINPUTDEV=>
 					  mangle_dev(config ("audiodev_input")),
-				      VIDEOPATH=> $videopath}]);
+				      VIDEOPATH=> $videopath,
+				      INPUTOPTIONS=> config("inputoptions")
+				    }]);
 		    unlink $log->path; # XX config?
 		} $collector;
 
@@ -589,21 +593,22 @@ sub pipeline_Process {
 sub start_echo {
     $echo= pipeline_Process
 	(Subcmd
-	 ("echo_mencoder",
-	  [DBG
-	   templated_config
-	   "mencoder_cmd",
-	   +{VIDEODEV=> config ("videodev"),
-	     AUDIOINPUTDEV=> config ("audiodev_input"),
-	     MANGLEDAUDIOINPUTDEV=>
-		 mangle_dev(config ("audiodev_input")),
-		 VIDEOPATH=> "-"}]),
-	 Subcmd
-	 ("buffer",
-	  ["buffer", "-s", "100000"]),
-	 Subcmd
 	 ("echo_mplayer",
-	  delayed_mplayer_cmd));
+	  [DBG
+	   @{mplayer_args
+	     templated_config
+	     ("inputoptions",
+	      +{VIDEODEV=> config("videodev"),
+		AUDIOINPUTDEV=> config ("audiodev_input"),
+		MANGLEDAUDIOINPUTDEV=>
+		    mangle_dev(config ("audiodev_input"))}),
+	     templated_config
+	     ("mplayer_playback_opts",
+	     +{VIDEODEV=> config ("videodev"),
+	       AUDIOOUTPUTDEV=> config ("audiodev_output"),
+	       MANGLEDAUDIOOUTPUTDEV=>
+		   mangle_dev(config ("audiodev_output")),
+	      })}]));
 }
 
 sub make_restart {
