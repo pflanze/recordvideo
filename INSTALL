@@ -3,7 +3,7 @@
  # cd /opt; mkdir chj; cd chj
  # git clone https://github.com/pflanze/chj-perllib.git perllib
  # git clone https://github.com/pflanze/recordvideo.git
- # apt-get install libyaml-perl libgtk3-perl mplayer mencoder alsa-utils
+ # apt-get install libyaml-perl libgtk3-perl mplayer mencoder alsa-utils buffer
 
 Note that we need the mplayer package, not the Ubuntu mplayer2
 package; the latter is said to be a separate (and possibly outdated)
