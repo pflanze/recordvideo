@@ -8,7 +8,7 @@ use strict;
 our @videodevs= map { "/dev/video$_" } (0..3);
 our @audiodevs_input= ("default", map { "hw:$_,0" } (0..3)); # XX: ,0 or ,1?  sigh
 our @audiodevs_output= ("default", map { "hw:$_,0" } (0..3));
-our $videosuffix= ".video"; # XX config?
+our $videosuffix= ".avi"; # XX config?
 
 our $default_config=
   +{
