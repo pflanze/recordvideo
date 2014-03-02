@@ -20,7 +20,7 @@ our $default_config=
     mencoder_cmd=>
 	join(" ",
 	     'mencoder',
-	     '$INPUTOPTIONS',
+	     '"${INPUTOPTIONS[@]}"',
 	     '-really-quiet', # necessary over -quiet if "-" is to be used for output
 	     '-noskip',
 	     '-of lavf -lavfopts format=avi',
@@ -150,14 +150,38 @@ sub config ($) {
 }
 
 sub templated_config ($$) {
-    my ($key,$env)=@_;
-    # implement shell quote parsing? ? ?
-    # or, use the shell ?
-    my $v= config $key;
-    # unsafe code execution !:
+    my ($key,$vars)=@_;
+    # use the actual shell to do option parsing.  WARNING: unsafe code
+    # execution! Also, beware of variable names that have special
+    # meaning in the shell or linker.
+
+    my $code= config $key;
+    
+    # treat array variables specially, as they cannot be passed as env
+    # vars:
+    my %aryvars;
+    my %env;
+    for my $var (keys %$vars) {
+	my $v= $$vars{$var};
+	if (ref $v) {
+	    $aryvars{$var}= $v;
+	} else {
+	    $env{$var}= $v;
+	}
+    }
+    
     my $in= Chj::IO::Command->new_sender
-	($env,
-	 "bash", "-c", q{set -eu; perl -we 'print $_,"\0" for @ARGV' -- }.$v);
+	(\%env,
+	 "bash", "-c",
+	 # set array variables
+	 join("", map {
+	     my $var=$_;
+	     my $vals= $aryvars{$var};
+	     my $i=0;
+	     "declare -A $var; $var=("
+		 .join(" ",map {"[".$i++."]=".singlequote_sh $_} @$vals).");\n"
+	 } keys %aryvars).
+	 q{set -eu; perl -we 'print $_,"\0" for @ARGV' -- }.$code);
     my @vals= $in->xreadline0;
     $in->xxfinish;
     local $/="\0"; chomp @vals;
@@ -506,6 +530,16 @@ sub delayed_mplayer_cmd () {
      "-"]
 }
 
+sub inputoptions {
+    templated_config
+	("inputoptions",
+	 +{VIDEODEV=> config("videodev"),
+	   AUDIOINPUTDEV=> config ("audiodev_input"),
+	   MANGLEDAUDIOINPUTDEV=>
+	       mangle_dev(config ("audiodev_input"))})
+}
+
+
 sub do_start {
     $tapename_entry->set_editable(0); # avoid race condition (well)
     if (defined (my $tapename = maybe_valid_tapename_entry_text)) {
@@ -529,7 +563,7 @@ sub do_start {
 				      MANGLEDAUDIOINPUTDEV=>
 					  mangle_dev(config ("audiodev_input")),
 				      VIDEOPATH=> $videopath,
-				      INPUTOPTIONS=> config("inputoptions")
+				      INPUTOPTIONS=> [inputoptions],
 				    }]);
 		    unlink $log->path; # XX config?
 		} $collector;
@@ -596,12 +630,7 @@ sub start_echo {
 	 ("echo_mplayer",
 	  [DBG
 	   @{mplayer_args
-	     templated_config
-	     ("inputoptions",
-	      +{VIDEODEV=> config("videodev"),
-		AUDIOINPUTDEV=> config ("audiodev_input"),
-		MANGLEDAUDIOINPUTDEV=>
-		    mangle_dev(config ("audiodev_input"))}),
+	     inputoptions,
 	     templated_config
 	     ("mplayer_playback_opts",
 	     +{VIDEODEV=> config ("videodev"),
