@@ -22,6 +22,8 @@ package Chj::Recordvideo::Utils;
 	   xmlquote
 	   xlogspawn
 	   xlogsystem xxINTlogsystem make_maybe_result2error
+           Subcmd pipeline_Process_with_prethunk
+           logfh
 	 );
 @EXPORT_OK=qw(with_setsid_SIGINT); # don't use, delete?
 %EXPORT_TAGS=(all=>[@EXPORT,@EXPORT_OK]);
@@ -200,5 +202,145 @@ sub make_maybe_result2error ($) {
     }
 }
 
+
+# ------------------------------------------------------------------
+
+use Chj::xtmpfile;
+
+sub logbase () {
+    # config ("basedir")."/." -- not good, if not mounted! Also, autocleaning.
+    "/tmp/"
+}
+
+sub logfh ($) {
+    my ($basename)=@_;
+    my $fh= xtmpfile (logbase.$basename.".log-");
+    $fh->autoclean(0);
+    $fh
+}
+
+
+use Chj::xpipe;
+use POSIX 'SIGINT';
+
+{package PFLANZE::Subcmd;
+ use Chj::Struct ["logname", "cmd", "maybe_prethunk"];
+ _END_}
+sub Subcmd ($$;$) {
+    PFLANZE::Subcmd->new(@_)
+}
+
+# a for loop that signals whether it's the last item
+sub forlast ($$) {
+    my ($ary,$proc)=@_;
+    my $len= @$ary;
+    for my $i (0..$len-2) {
+	&$proc ($$ary[$i],0)
+    }
+    &$proc ($$ary[$len-1],1)
+}
+
+#sub boundary_array_fold_right ($$) {
+
+sub array_fold_withterminal ($$$) {
+    # passes additional flag to fn whether it is the last item
+    my ($fn, $val, $ary)=@_;
+    my $last_i = $#$ary;
+    for my $i (0..$last_i) {
+	$val= &$fn ($$ary[$i],$val,$i==$last_i);
+    }
+    $val
+}
+
+use Chj::TEST;
+
+TEST { array_fold_withterminal
+	   sub{ my ($v,$res,$is_last)=@_; [$v,$is_last,$res]},
+	   "START",
+	   [10,20,30] }
+  [ 30, 1,
+    [ 20, '',
+      [ 10, '',
+	'START']]];
+
+use Chj::Processes;
+
+sub pipeline_Process_with_prethunk ($$;$) {
+    my ($prethunk, $subcmds, $maybe_collector) = @_;
+    Process {
+	#my $processname= "pipeline_Process-".join("-",map { $_->cmd->[0] } @$subcmds);
+	#psname $processname;
+	&$prethunk;
+	my %pids; # pid => killed?
+	my $interrupted=0;
+	#local
+	$SIG{INT}= sub {
+	    $interrupted=1;
+	    for (sort keys %pids) {
+		kill SIGINT, $_;
+		$pids{$_}=1;
+	    }
+	};
+
+	array_fold_withterminal
+	    (sub {
+		my ($subcmd,$maybe_frompipe,$is_last)=@_;
+		if ($interrupted) {
+		    if ($maybe_frompipe) {
+			my ($r,$w)= @$maybe_frompipe;
+			$r->xclose;
+		    }
+		    undef
+		} else {
+		    my $maybe_topipe= $is_last ? undef : [xpipe];
+		    if (my $pid= xfork) {
+			$pids{$pid}=0;
+			# (there's still a race between creating the
+			# hash key and setting it to 0, right? then
+			# that process will be killed twice)
+			if ($maybe_frompipe) {
+			    my ($r,$w)= @$maybe_frompipe;
+			    $r->xclose;
+			}
+			if ($maybe_topipe) {
+			    my ($r,$w)= @$maybe_topipe;
+			    $w->xclose;
+			}
+			$maybe_topipe
+		    } else {
+			if ($maybe_frompipe) {
+			    my ($r,$w)= @$maybe_frompipe;
+			    $r->xdup2 (0);
+			}
+			if ($maybe_topipe) {
+			    my ($r,$w)= @$maybe_topipe;
+			    $r->xclose;
+			    $w->xdup2 (1);
+			}
+			if (my $prethunk= $subcmd->maybe_prethunk) {
+			    &$prethunk;
+			}
+			xxINTlogsystem (logfh ($subcmd->logname),
+					0, # !
+					$subcmd->cmd);
+			exit 0;
+		    }
+		}
+	     },
+	     undef,
+	     $subcmds);
+	if ($interrupted) {
+	    for (sort keys %pids) {
+		kill SIGINT, $_
+		    unless $pids{$_}
+	    }
+	}
+	# no need for xxwaitpid as the subprocesses are
+	# sending their errors directly
+	xwaitpid $_ for sort keys %pids;
+    } $maybe_collector;
+}
+
+# ------------------------------------------------------------------
 
 1
