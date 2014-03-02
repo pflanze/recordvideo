@@ -19,7 +19,7 @@ Chj::Processes
  $SIG{PIPE}= "IGNORE";
 
  # optional:
- $Chj::Processes::verbose = 1; # default: off
+ $Chj::Processes::verbose = 0; # 0=quiet; 1=show errors. default: 1
  $Chj::Processes::socketdir = "/foo/bar"; # default: xtmpdir
 
  my $p= Process {
@@ -159,7 +159,7 @@ our $socketdir= xtmpdir;
 $socketdir->autoclean(0);# XX 2 can't work. hm.
 
 
-our $verbose= 0;
+our $verbose= 1;
 
 sub new_Process_socket () {
     my $uuid= random_passwd_string(24);
