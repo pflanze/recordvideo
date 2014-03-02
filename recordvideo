@@ -561,7 +561,7 @@ sub do_start {
 
 		# start delayed play processes
 
-		$mplayer= pipe2_Process
+		$mplayer= pipeline_Process_with_prethunk
 		    (sub {
 			psname "delayed-mplayer";
 			sleep $playback_delay;
@@ -570,11 +570,14 @@ sub do_start {
 			close STDERR;
 			close STDIN;
 		     },
-		     "delayed_mplayer_tail",
-		     [DBG
-		      "tail", "-f", "-c", "20000000", "--", $videopath],
-		     "delayed_mplayer",
-		     delayed_mplayer_cmd);
+		     [Subcmd
+		      ("delayed_mplayer_tail",
+		       [DBG
+			"tail", "-f", "-c", "20000000", "--", $videopath]),
+		      Subcmd
+		      ("delayed_mplayer",
+		       delayed_mplayer_cmd)],
+		     $collector);
 
 		#$status_recording_filename= $nameplus; ah in scope of thread proc anyway above
 		$status->send ("recording '$nameplus'"); # afterwards updated through sep thread
@@ -595,49 +598,131 @@ sub do_start {
 use Chj::xpipe;
 use POSIX 'SIGINT';
 
-sub pipe2_Process ($$$$$) {
-    my ($prethunk, $logname1, $cmd1, $logname2, $cmd2)=@_;
-    Process {
-	psname "pipe2_Process-$$cmd1[0]-$$cmd2[0]";
-	&$prethunk;
-	my ($r,$w)= xpipe;
-	my $record;
-	my $play;
-	local $SIG{INT}= sub {
-	    kill SIGINT, $record if defined $record;
-	    kill SIGINT, $play if defined $play;
-	};
-	if ($record= xfork) {
-	    if ($play= xfork) {
-		# no need for xxwaitpid as the subprocesses are
-		# sending their errors directly
-		xwaitpid $record;
-		xwaitpid $play;
-	    } else {
-		$w->xclose;
-		$r->xdup2 (0);
-		xxINTlogsystem (logfh $logname2,
-				1,
-				$cmd2);
-		exit 0;
-	    }
-	} else {
-	    $r->xclose;
-	    $w->xdup2 (1);
-	    xxINTlogsystem (logfh $logname1,
-			    0,
-			    $cmd1);
-	    exit 0;
-	}
-    } $collector;
+{package PFLANZE::Subcmd;
+ use Chj::Struct ["logname", "cmd", "maybe_prethunk"];
+ _END_}
+sub Subcmd ($$;$) {
+    PFLANZE::Subcmd->new(@_)
 }
 
+# a for loop that signals whether it's the last item
+sub forlast ($$) {
+    my ($ary,$proc)=@_;
+    my $len= @$ary;
+    for my $i (0..$len-2) {
+	&$proc ($$ary[$i],0)
+    }
+    &$proc ($$ary[$len-1],1)
+}
+
+#sub boundary_array_fold_right ($$) {
+
+sub array_fold_withterminal ($$$) {
+    # passes additional flag to fn whether it is the last item
+    my ($fn, $val, $ary)=@_;
+    my $last_i = $#$ary;
+    for my $i (0..$last_i) {
+	$val= &$fn ($$ary[$i],$val,$i==$last_i);
+    }
+    $val
+}
+
+use Chj::TEST;
+
+TEST { array_fold_withterminal
+	   sub{ my ($v,$res,$is_last)=@_; [$v,$is_last,$res]},
+	   "START",
+	   [10,20,30] }
+  [ 30, 1,
+    [ 20, '',
+      [ 10, '',
+	'START']]];
+
+sub pipeline_Process_with_prethunk ($$;$) {
+    my ($prethunk, $subcmds, $maybe_collector) = @_;
+    my $processname= "pipeline_Process-".join("-",map { $_->cmd->[0] } @$subcmds);
+    Process {
+	psname $processname;
+	&$prethunk;
+	my %pids; # pid => killed?
+	my $interrupted=0;
+	#local
+	$SIG{INT}= sub {
+	    $interrupted=1;
+	    for (sort keys %pids) {
+		kill SIGINT, $_;
+		$pids{$_}=1;
+	    }
+	};
+
+	array_fold_withterminal
+	    (sub {
+		my ($subcmd,$maybe_frompipe,$is_last)=@_;
+		if ($interrupted) {
+		    if ($maybe_frompipe) {
+			my ($r,$w)= @$maybe_frompipe;
+			$r->xclose;
+		    }
+		    undef
+		} else {
+		    my $maybe_topipe= $is_last ? undef : [xpipe];
+		    if (my $pid= xfork) {
+			$pids{$pid}=0;
+			# (there's still a race between creating the
+			# hash key and setting it to 0, right? then
+			# that process will be killed twice)
+			if ($maybe_frompipe) {
+			    my ($r,$w)= @$maybe_frompipe;
+			    $r->xclose;
+			}
+			if ($maybe_topipe) {
+			    my ($r,$w)= @$maybe_topipe;
+			    $w->xclose;
+			}
+			$maybe_topipe
+		    } else {
+			if ($maybe_frompipe) {
+			    my ($r,$w)= @$maybe_frompipe;
+			    $r->xdup2 (0);
+			}
+			if ($maybe_topipe) {
+			    my ($r,$w)= @$maybe_topipe;
+			    $r->xclose;
+			    $w->xdup2 (1);
+			}
+			if (my $prethunk= $subcmd->maybe_prethunk) {
+			    &$prethunk;
+			}
+			xxINTlogsystem (logfh ($subcmd->logname),
+					0, # !
+					$subcmd->cmd);
+			exit 0;
+		    }
+		}
+	     },
+	     undef,
+	     $subcmds);
+	if ($interrupted) {
+	    for (sort keys %pids) {
+		kill SIGINT, $_
+		    unless $pids{$_}
+	    }
+	}
+	# no need for xxwaitpid as the subprocesses are
+	# sending their errors directly
+	xwaitpid $_ for sort keys %pids;
+    } $maybe_collector;
+}
+
+sub pipeline_Process {
+    pipeline_Process_with_prethunk (sub{ }, [@_], $collector)
+}
+
+
 sub start_echo {
-    $echo= pipe2_Process
-	( sub {
-	    psname "echo";
-	  },
-	  "echo_mencoder",
+    $echo= pipeline_Process
+	(Subcmd
+	 ("echo_mencoder",
 	  [DBG
 	   templated_config
 	   "mencoder_cmd",
@@ -645,9 +730,10 @@ sub start_echo {
 	     AUDIOINPUTDEV=> config ("audiodev_input"),
 	     MANGLEDAUDIOINPUTDEV=>
 		 mangle_dev(config ("audiodev_input")),
-		 VIDEOPATH=> "-"}],
-	  "echo_mplayer",
-	  delayed_mplayer_cmd);
+		 VIDEOPATH=> "-"}]),
+	 Subcmd
+	 ("echo_mplayer",
+	  delayed_mplayer_cmd));
 }
 
 sub make_restart {
