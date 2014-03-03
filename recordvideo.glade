@@ -203,6 +203,38 @@
               </packing>
             </child>
             <child>
+              <object class="GtkLabel" id="label3">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="halign">end</property>
+                <property name="label" translatable="yes">Direct mplayer options:</property>
+              </object>
+              <packing>
+                <property name="left_attach">0</property>
+                <property name="top_attach">4</property>
+                <property name="width">1</property>
+                <property name="height">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkEntry" id="mplayer_direct_opts">
+                <property name="visible">True</property>
+                <property name="can_focus">True</property>
+                <property name="tooltip_text" translatable="yes">The mplayer options to use to play video for direct echo (no recording). The "mplayer" command name is added automatically.
+Bash syntax (use double quotes to protect from field splitting!).
+Variables: "$VIDEODEV"
+</property>
+                <property name="hexpand">True</property>
+                <property name="invisible_char">●</property>
+              </object>
+              <packing>
+                <property name="left_attach">1</property>
+                <property name="top_attach">4</property>
+                <property name="width">1</property>
+                <property name="height">1</property>
+              </packing>
+            </child>
+            <child>
               <object class="GtkLabel" id="label4">
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
