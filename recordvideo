@@ -62,8 +62,6 @@ GetOptions("verbose"=> \$verbose,
 	   ) or exit 1;
 usage if @ARGV;
 
-$Chj::Processes::verbose = $verbose;
-
 use lib "/opt/chj/perllib";
 use lib "$mydir/lib";
 use Chj::UIProcessor;
@@ -80,6 +78,8 @@ use Chj::Gtk::Helpers;
 use Chj::Glib::Watcher;
 use Chj::Recordvideo::Utils;
 use Chj::Recordvideo::Devices;
+
+$Chj::Processes::verbose = $verbose;
 
 # -------------
 
@@ -485,9 +485,8 @@ our $aplay_test;
 
 our $statusupdater;
 
-#use Time::HiRes qw(time sleep);
 
-#use  linked list  sGH
+# (linked list would be nice..)
 sub sec2str {
     my ($t,$secs)=@_;
     my $secs2=[@$secs];
@@ -507,8 +506,6 @@ sub t2hms {
 			 ]);
     substr $str, 0, length($str)-1
 }
-
-#use Chj::repl;repl;exit;
 
 sub maybe_valid_tapename_entry_text {
     my $tapename= chompspace $tapename_entry->get_text;
@@ -548,7 +545,7 @@ sub do_start {
     if (defined (my $tapename = maybe_valid_tapename_entry_text)) {
 	my ($nameplus, $videopath)= filepaths $tapename;
 
-	# kill video and sound echo processs
+	# kill echo process
 	Stop_then $mplayer, sub {
 	    Stop_then $echo, sub {
 
@@ -587,8 +584,7 @@ sub do_start {
 		    }
 		} $collector;
 
-		# start delayed play processes
-
+		# start delayed play process
 		$mplayer= pipeline_Process_with_prethunk
 		    (sub {
 			psname "delayed-mplayer";
@@ -607,12 +603,11 @@ sub do_start {
 		       delayed_mplayer_cmd)],
 		     $collector);
 
-		#$status_recording_filename= $nameplus; ah in scope of thread proc anyway above
-		$status->send ("recording '$nameplus'"); # afterwards updated through sep thread
+		$status->send ("recording '$nameplus'");
+		# status is afterwards updated through sep process
 		$tapename_entry->set_sensitive(0);
 		$tapename_clear->set_sensitive(0);
 		update_start_button ("recording");
-		#use Chj::repl;repl;
 		$stop_button->set_sensitive(1);
 	    }
 	};
@@ -997,9 +992,8 @@ signal_set($window1, "delete-event"=> \&do_quit);
 $window1->show_all;
 
 start_echo;
-#for(1..5){sleep 1};
-#^ ok, still works that way even though appearance of the window is
-#  delayed, interesting.
+# ^ interestingly this works fine even though the window is not
+# visible yet, interesting.
 
 $tapename_entry->grab_focus;
 
