@@ -366,6 +366,7 @@ sub update_start_button ($) {
 			 $start_button_tooltip_text_normal);
 		    $start_button->set_sensitive(1)
 			if $start_button_is_stopped;
+		    status ""; # ready to start
 		 });
 	},
 	tapename_bad=> sub {
