@@ -207,7 +207,7 @@
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
                 <property name="halign">end</property>
-                <property name="label" translatable="yes">Direct mplayer options:</property>
+                <property name="label" translatable="yes">Mencoder/mplayer input options:</property>
               </object>
               <packing>
                 <property name="left_attach">0</property>
@@ -217,12 +217,13 @@
               </packing>
             </child>
             <child>
-              <object class="GtkEntry" id="mplayer_direct_opts">
+              <object class="GtkEntry" id="inputoptions">
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
-                <property name="tooltip_text" translatable="yes">The mplayer options to use to play video for direct echo (no recording). The "mplayer" command name is added automatically.
+                <property name="tooltip_text" translatable="yes">The options passed to mencoder and mplayer for video and audio input (passed as "${INPUTOPTIONS[@]}" to those) 
 Bash syntax (use double quotes to protect from field splitting!).
-Variables: "$VIDEODEV"
+Variables: "$MANGLEDAUDIOINPUTDEV", "$AUDIOINPUTDEV"
+   (and "$VIDEODEV", but don't use, mplayer and mencoder need the mangled form)
 </property>
                 <property name="hexpand">True</property>
                 <property name="invisible_char">●</property>

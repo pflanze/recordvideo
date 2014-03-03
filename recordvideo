@@ -834,6 +834,7 @@ sub get_input_fields {
 	my $widget= get $name;
 	$$do_settings__cfg{$name}= $widget->get_text;
     };
+    &$get_input ("inputoptions");
     &$get_input ("mplayer_playback_opts");
     &$get_input ("mencoder_cmd");
     
@@ -880,6 +881,7 @@ sub redo_settings {
 	   #set_visible(1)
 	   $widget->set_text($val);
     };
+    &$set_input ("inputoptions");
     &$set_input ("mplayer_playback_opts");
     &$set_input ("mencoder_cmd");
 
