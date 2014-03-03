@@ -23,6 +23,7 @@ package Chj::Process;
 use strict;
 
 use POSIX 'SIGINT';
+# XX should probably use SIGTERM instead!
 
 use Chj::Transmittable;
 use Chj::IO::Socket::UNIX;
@@ -42,6 +43,11 @@ sub kill {
     my ($maybe_signal)=@_;
     my $signal = $maybe_signal // SIGINT;
     return CORE::kill $signal, $s->pid;
+}
+
+sub terminate {
+    my $s=shift;
+    $s->kill(SIGINT);
 }
 
 sub kill_the_host {

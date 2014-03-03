@@ -402,16 +402,10 @@ sub xxINTlogsystem_mplayer {
 }
 
 
-# on the monkey -- XX remove as there are only processes now, no futures?
-sub Chj::Process::stop {
-    my $s=shift;
-    $s->kill;
-}
-
 sub Stop ($) {
-    my ($maybe_future)=@_;
-    if ($maybe_future) {
-	$maybe_future->stop;
+    my ($maybe_process)=@_;
+    if ($maybe_process) {
+	$maybe_process->terminate;
 	undef $_[0]; # hacky?
     }
 }
@@ -454,7 +448,7 @@ sub Stop_then ($$) {
 	    push_then $maybe_process, $cont;
 	    # XX also add a timeout event, so as to check with "kill 0"
 	    # whether still around?
-	    $maybe_process->stop;
+	    $maybe_process->terminate;
 	    undef $_[0]; # hacky?
 	}
     } else {
