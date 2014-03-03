@@ -43,7 +43,12 @@ BEGIN {
 
 sub usage {
     print STDERR map{"$_\n"} @_ if @_;
-    print "$myname ..
+    print "$myname [-v]
+
+  Gtk3 program to record video tapes through a USB video grabber device.
+ 
+  See ${mydir}README.md
+  and ${mydir}INSTALL
 
   (Christian Jaeger <$email>)
 ";
@@ -52,12 +57,10 @@ exit (@_ ? 1 : 0);
 
 use Getopt::Long;
 our $verbose=0;
-#our $opt_dry;
 GetOptions("verbose"=> \$verbose,
 	   "help"=> sub{usage},
-	   #"dry-run"=> \$opt_dry,
 	   ) or exit 1;
-#usage unless @ARGV;
+usage if @ARGV;
 
 $Chj::Processes::verbose = $verbose;
 
