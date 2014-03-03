@@ -19,6 +19,7 @@ Chj::Recordvideo::Utils
 package Chj::Recordvideo::Utils;
 @ISA="Exporter"; require Exporter;
 @EXPORT=qw(DBG
+	   t2hms
 	   xmlquote
 	   xlogspawn
 	   xlogsystem xxINTlogsystem make_maybe_result2error
@@ -36,6 +37,28 @@ use Carp;
 sub DBG {
     carp "DBG: ", join(" ",map { singlequote_sh $_ } @_);
     @_
+}
+
+
+# (linked list would be nice..)
+sub sec2str {
+    my ($t,$secs)=@_;
+    my $secs2=[@$secs];
+    my $scs= pop @$secs2;
+    defined $scs or return "$t:";
+    use integer;
+    my $higher= $t / $scs;
+    my $lower= $t % $scs;
+    ($higher ? sec2str($higher, $secs2) : "") . sprintf('%02i:', $lower);
+}
+
+sub t2hms {
+    my ($t)=@_;
+    my $str= sec2str($t, [24,#hour/day
+			  60,#min/hour
+			  60,#sec/min
+			 ]);
+    substr $str, 0, length($str)-1
 }
 
 
