@@ -766,10 +766,8 @@ Must start with /dev/. Text after the space is explanatory only and ignored for 
                 <property name="can_focus">True</property>
                 <property name="can_default">True</property>
                 <property name="has_tooltip">True</property>
-                <property name="tooltip_markup" translatable="yes">The name of the tape, which will be used as part of the sound and audio file names. 
-Any characters except for &amp;quot;/&amp;quot; are allowed.</property>
-                <property name="tooltip_text" translatable="yes">The name of the tape, which will be used as part of the sound and audio file names. 
-Any characters except for "/" are allowed.</property>
+                <property name="tooltip_text" translatable="yes">The name of the tape, which will be used as part of the video output file path.
+The "/" character is used to separate directory names from file names, if you use it, subdirectories will be created as needed.</property>
                 <property name="max_length">70</property>
                 <property name="invisible_char">●</property>
                 <property name="truncate_multiline">True</property>

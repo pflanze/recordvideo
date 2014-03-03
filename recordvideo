@@ -483,8 +483,14 @@ our $statusupdater;
 sub maybe_valid_tapename_entry_text {
     my $tapename= chompspace $tapename_entry->get_text;
     if (length $tapename) {
-	$tapename
+	if ($tapename =~ m |^/|) {
+	    status "'/' is used to separate subdirectory name from filename, cannot start with one";
+	    undef
+	} else {
+	    $tapename
+        }
     } else {
+	status_tapename;
 	undef
     }
 }
@@ -587,7 +593,6 @@ sub do_start {
 
     } else {
 	$tapename_entry->set_editable(1);
-	status_tapename;
     }
 }
 
