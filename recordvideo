@@ -66,18 +66,17 @@ use lib "/opt/chj/perllib";
 use lib "$mydir/lib";
 use Chj::UIProcessor;
 use Chj::Processes;
-use Chj::xperlfunc ":all";
+use Chj::xperlfunc ":all"; # xspawn
 use Chj::chompspace;
 use Chj::IO::Command;
-use Chj::xsysopen ':all';
 use Chj::singlequote 'singlequote_sh';
 use Chj::callcc;
 use Gtk3 -init;
-use YAML qw(DumpFile LoadFile);
 use Chj::Gtk::Helpers;
 use Chj::Glib::Watcher;
 use Chj::Recordvideo::Utils;
 use Chj::Recordvideo::Devices;
+use Chj::Config;
 
 $Chj::Processes::verbose = $verbose;
 
@@ -137,19 +136,46 @@ sub psname ($) {
     $0= "recordvideo $name";
 }
 
-our $configpath= "$ENV{HOME}/.$myname.conf";
+our $config;
 
-our $config= -e $configpath ? LoadFile($configpath) : $default_config;
-defined $config or do {
-    warn "loading the config file failed, using default values instead";
-    $config= $default_config;
-};
+sub config_save ($) {
+    my ($cfg)=@_;
+    $config= $cfg->do_save (\&error);
+}
 
 sub config ($) {
     my ($key)=@_;
-    exists $$config{$key} or die "wrong config key '$key'";
-    defined $$config{$key} or die "undefined config key '$key'";
-    $$config{$key}
+    unless ($config) {
+	config_save
+	    (Chj::Config->new("$ENV{HOME}/.$myname.conf", $default_config)
+	     ->do_load
+	     (sub {
+		 my ($id,@msg)=@_;
+		 note (@msg),
+	      },
+	      sub { # confirm
+		  my ($id,$msg)=@_;
+		  my $ans= dialog("info", $msg, ["Quit", "Ok"], -1);
+		  if ($ans==1) {
+		      # return
+		  } else {
+		      # window close shall also always mean quit app.
+		      do_quit ();
+		      exit 0;
+		  }
+	      },
+	      sub { # ask
+		  my ($id, $msg,$buttons)=@_;
+		  my $ans= dialog("question", $msg, $buttons, -1);
+		  if ($ans < 0) {
+		      do_quit ();
+		      exit 0;
+		  } else {
+		      $ans
+		  }
+	      }));
+    }
+    $config->get($key)
 }
 
 sub templated_config ($$) {
@@ -193,7 +219,7 @@ sub templated_config ($$) {
 
 sub filepaths ($) {
     our ($tapename)= @_;
-    our $basepath= "$$config{basedir}/$tapename-";
+    our $basepath= $config->get("basedir")."/$tapename-";
     our @nums= sort {
 	$a <=> $b
     } map {
@@ -223,33 +249,96 @@ sub get ($) {
 
 our $after_quit=0;
 
-sub error {
-    my ($msg,@args)=@_;
-    if ($after_quit) {
-	print STDERR "error message during shutdown:\n",
-	"  $msg\n",
-	map {
-	    "  $_\n"
-	} @args;
-    } else {
-	my $dlg= Gtk3::MessageDialog->new
-	  (undef, # GtkWindow *parent
-	   "modal", # "destroy_with_parent", # GtkDialogFlags flags
-	   "error", # GtkMessageType type -- expecting: info /
-		    # GTK_MESSAGE_INFO, warning / GTK_MESSAGE_WARNING,
-		    # question / GTK_MESSAGE_QUESTION, error /
-		    # GTK_MESSAGE_ERROR, other / GTK_MESSAGE_OTHER
-	   "close", # GtkButtonsType buttons
-	   # const gchar *message_format, ...
-	   "",
-	  );
-	$dlg->set_markup('<b>'.xmlquote($msg).'</b>'."\n\n"
-			 .join("\n\n", map {xmlquote $_} @args));
-	$dlg->set_title("$myname error");
-	$dlg->set_resizable(1);
-	$dlg->run;
-	$dlg->destroy;
+
+sub flatten {
+    my @res;
+    for (@_) {
+	if (ref ($_) eq "ARRAY") {
+	    push @res, flatten (@$_);
+	} else {
+	    push @res, $_;
+	}
     }
+    @res
+}
+
+sub dialog_markup {
+    my ($msg,@args)=@_;
+    '<b>'.xmlquote($msg).'</b>'."\n\n"
+	.join("\n\n", map {xmlquote $_} @args)
+}
+
+sub make_messagedialog {
+    my ($type,
+	# GtkMessageType type -- expecting: info /
+	# GTK_MESSAGE_INFO, warning / GTK_MESSAGE_WARNING,
+	# question / GTK_MESSAGE_QUESTION, error /
+	# GTK_MESSAGE_ERROR, other / GTK_MESSAGE_OTHER
+	$buttonstype
+	# GtkButtonsType buttons
+	)=@_;
+    sub {
+	my ($msg,@args)= flatten @_;
+	if ($after_quit) {
+	    print STDERR "$type message during shutdown:\n",
+	    "  $msg\n",
+	    map {
+		"  $_\n"
+	    } @args;
+	} else {
+	    my $dlg= Gtk3::MessageDialog->new
+	      (undef, # GtkWindow *parent
+	       "modal", # "destroy_with_parent", # GtkDialogFlags flags
+	       $type,
+	       $buttonstype,
+	       # const gchar *message_format, ...
+	       "",
+	      );
+	    $dlg->set_markup(dialog_markup $msg,@args);
+	    $dlg->set_title("$myname $type");
+	    $dlg->set_resizable(1);
+	    $dlg->run;
+	    $dlg->destroy;
+	}
+    }
+}
+
+sub error;
+*error= make_messagedialog ("error","close");
+sub note;
+*note=  make_messagedialog ("info","ok");
+
+sub dialog ($$$$) {
+    @_==4 or die;
+    my ($type,
+	# GtkMessageType type -- expecting:
+	# info / GTK_MESSAGE_INFO,
+	# warning / GTK_MESSAGE_WARNING,
+	# question / GTK_MESSAGE_QUESTION, 
+	# error / GTK_MESSAGE_ERROR,
+	# other / GTK_MESSAGE_OTHER
+	$msg_args,$buttons,$other_id)=@_;
+
+    local our $dlg= Gtk3::MessageDialog->new
+	(undef, # GtkWindow *parent
+	 "modal", # "destroy_with_parent", # GtkDialogFlags flags
+	 $type,
+	 "none", # buttonstype,
+	 # const gchar *message_format, ...
+	 "",
+	);
+    $dlg->set_title("$myname $type");
+    $dlg->set_resizable(1);
+    $dlg->set_markup(dialog_markup flatten $msg_args);
+
+    my $i=10;
+    for (@$buttons) {
+	$dlg->add_button($_, $i++);
+    }
+    #$dlg->show_all; # huh necessary otherwise the content_area does not show?
+    my $answer= $dlg->run;
+    $dlg->destroy;
+    $answer >= 10 ? $answer-10 : $other_id
 }
 
 sub maybe_result2error($);
@@ -260,24 +349,6 @@ sub result2error ($) {
     maybe_result2error $result;
 }
 
-sub config_save () {
-    my $tmp= $configpath.".tmp";
-    # make file private:
-    xsysopen ($tmp, O_CREAT, 0600);
-    # actually write it:
-    if (DumpFile $tmp, $config) {
-	xrename $tmp, $configpath
-    } else {
-	error "could not write config file", "$!", $configpath
-    }
-}
-
-sub config_set ($$) {
-    my ($key,$val)=@_;
-    exists $$config{$key} or die "wrong config key '$key'";
-    $$config{$key}= $val;
-    config_save;
-}
 
 our $statusbar = get "statusbar";
 our $last_context_id;
@@ -663,6 +734,7 @@ sub do_quit {
     Stop $aplay_test;
     Stop $statusupdater;
 
+    killall;
     $after_quit=1;
     Gtk3::main_quit;
 }
@@ -713,7 +785,7 @@ sub ask_location {
 
 sub do_location {
     if (defined (my $path= ask_location)) {
-	config_set("basedir", $path);
+	config_save ($config->set("basedir", $path));
     }
 }
 
@@ -725,6 +797,9 @@ our $settings_button_reroute_sound= get 'settings_button_reroute_sound';
 our $settings_button_reroute_video= get 'settings_button_reroute_video';
 
 our $do_settings__cfg; # in UI thread, set/maintained by do_settings
+sub do_settings__cfg_set ($$) {
+    $do_settings__cfg= $do_settings__cfg->set(@_);
+}
 
 # XX eliminate one of the Try buttons?
 signal_set ($settings_button_reroute_sound,
@@ -759,7 +834,7 @@ $settings_button_play_sound__to_normal= UIProcess {
 		 xxINTlogsystem(logfh "aplay",
 				1,
 				[DBG
-				 "aplay", "-D", $$do_settings__cfg{audiodev_output},
+				 "aplay", "-D", $do_settings__cfg->get("audiodev_output"),
 				 "--", $mydir."/Media/Slurp.wav"]);
 	     } $settings_button_play_sound__to_normal;
 	 });
@@ -829,8 +904,9 @@ our $do_settings__dlg= get "dialog_settings";
 our ($videodev_combobox, $audiodev_input_combobox, $audiodev_output_combobox);
 
 sub get_audiodev_output {
-    $$do_settings__cfg{audiodev_output} = $audiodev_output_combobox->get_text_part1
-	(\&redo_settings);
+    do_settings__cfg_set
+	("audiodev_output", $audiodev_output_combobox->get_text_part1
+	 (\&redo_settings));
 }
 
 sub get_input_fields {
@@ -838,27 +914,29 @@ sub get_input_fields {
     my $get_input= sub {
 	my ($name)=@_;
 	my $widget= get $name;
-	$$do_settings__cfg{$name}= $widget->get_text;
+	do_settings__cfg_set($name, $widget->get_text);
     };
     &$get_input ("inputoptions");
     &$get_input ("mplayer_playback_opts");
     &$get_input ("mencoder_cmd");
     
-    $$do_settings__cfg{videodev} = $videodev_combobox->get_text_part1
-	(\&redo_settings);
-    $$do_settings__cfg{audiodev_input} = $audiodev_input_combobox->get_text_part1
-	(\&redo_settings);
+    do_settings__cfg_set
+	("videodev",
+	 $videodev_combobox->get_text_part1(\&redo_settings));
+    do_settings__cfg_set
+	("audiodev_input",
+	 $audiodev_input_combobox->get_text_part1(\&redo_settings));
     get_audiodev_output;
 }
 
 sub redo_settings {
     my $set_location_button= sub {
-	   $settings_button_location->set_label($$do_settings__cfg{"basedir"});
+	$settings_button_location->set_label($do_settings__cfg->get("basedir"));
     };
     signal_set($settings_button_location,
 	       clicked=> sub {
 		   if (defined (my $path= ask_location)) {
-		       $$do_settings__cfg{"basedir"}= $path;
+		       do_settings__cfg_set("basedir", $path);
 		       &$set_location_button;
 		   }
 	       });
@@ -867,18 +945,18 @@ sub redo_settings {
     # set popup menues
     $videodev_combobox=
 	 ComboBox ("videodev", \@videodevs,
-		   get_v4ldevices, $$do_settings__cfg{videodev});
+		   get_v4ldevices, $do_settings__cfg->get("videodev"));
     $audiodev_input_combobox=
 	 ComboBox ("audiodev_input", \@audiodevs_input,
-		   get_audio_devices(0), $$do_settings__cfg{audiodev_input});
+		   get_audio_devices(0), $do_settings__cfg->get("audiodev_input"));
     $audiodev_output_combobox=
 	 ComboBox ("audiodev_output", \@audiodevs_output,
-		   get_audio_devices(1), $$do_settings__cfg{audiodev_output});
+		   get_audio_devices(1), $do_settings__cfg->get("audiodev_output"));
 
     # set input fields
     my $set_input= sub {
 	   my ($name)=@_;
-	   my $val= $$do_settings__cfg{$name};
+	   my $val= $do_settings__cfg->get($name);
 	   if (! defined $val) {
 	       error_undefined $name;
 	       $val="";
@@ -898,19 +976,18 @@ sub redo_settings {
 	    restart_echo;
 	}
     };
-    
+
     my $res= $do_settings__dlg->run;
     if ($res == OK) {
 	get_input_fields;
 
 	$do_settings__dlg->set_visible (0);
 	# 'commit'
-	$config= $do_settings__cfg;
-	config_save;
+	config_save ($do_settings__cfg);
 	# restart echo with new settings:
 	&$perhaps_restart_echo;
     } elsif ($res == REVERT_DEFAULTS) {
-	$do_settings__cfg= +{ %$default_config };
+	$do_settings__cfg= $do_settings__cfg->set_values($default_config);
 	goto \&redo_settings;
     } elsif ($res == REVERT) {
 	goto \&do_settings;
@@ -929,7 +1006,7 @@ sub redo_settings {
 }
 
 sub do_settings {
-    $do_settings__cfg= +{ %$config };
+    $do_settings__cfg= $config;
     goto \&redo_settings;
 }
 
@@ -972,14 +1049,14 @@ our $window1= get "window1";
 signal_set($window1, "delete-event"=> \&do_quit);
 $window1->show_all;
 
+#use Chj::repl; repl; exit;
 start_echo;
 
 $tapename_entry->grab_focus;
 
 use Chj::Backtrace;
-#use Chj::repl; repl;
+#use Chj::repl; repl; exit;
 Gtk3->main;
-killall;
 
 # $status->end; now unnecessary or bad as it's an UIProcess now
 
