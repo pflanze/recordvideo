@@ -973,8 +973,6 @@ signal_set($window1, "delete-event"=> \&do_quit);
 $window1->show_all;
 
 start_echo;
-# ^ interestingly this works fine even though the window is not
-# visible yet, interesting.
 
 $tapename_entry->grab_focus;
 
