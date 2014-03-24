@@ -46,7 +46,7 @@ sub usage {
     print "$myname [-v]
 
   Gtk3 program to record video tapes through a USB video grabber device.
- 
+
   See ${mydir}README.md
   and ${mydir}INSTALL
 
@@ -185,7 +185,7 @@ sub templated_config ($$) {
     # meaning in the shell or linker.
 
     my $code= config $key;
-    
+
     # treat array variables specially, as they cannot be passed as env
     # vars:
     my %aryvars;
@@ -198,7 +198,7 @@ sub templated_config ($$) {
 	    $env{$var}= $v;
 	}
     }
-    
+
     my $in= Chj::IO::Command->new_sender
 	(\%env,
 	 "bash", "-c",
@@ -509,7 +509,7 @@ sub then_is_zombie ($$) {
     } else {
 	0
     }
-}    
+}
 
 sub Stop_then ($$) {
     my ($maybe_process, $cont)=@_;
@@ -712,9 +712,9 @@ sub do_stop {
     Stop_then $mencoder, sub {
 	Stop_then $mplayer, sub {
 	    Stop $statusupdater;
-	    
+
 	    start_echo;
-	    
+
 	    status "stopped";
 	    $tapename_clear->set_sensitive(1);
 	    $tapename_entry->set_sensitive(1);
@@ -919,7 +919,7 @@ sub get_input_fields {
     &$get_input ("inputoptions");
     &$get_input ("mplayer_playback_opts");
     &$get_input ("mencoder_cmd");
-    
+
     do_settings__cfg_set
 	("videodev",
 	 $videodev_combobox->get_text_part1(\&redo_settings));
