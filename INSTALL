@@ -9,8 +9,13 @@ Note that we need the mplayer package, not the Ubuntu mplayer2
 package; the latter is said to be a separate (and possibly outdated)
 fork of mplayer and it won't work for recordvideo!
 
-Then create an Ubuntu style shortcut on your Desktop or whatever, or
-perhaps:
+Then to make it accessible from the command line, run:
  
  # ln -s /opt/chj/recordvideo/recordvideo /usr/local/bin
+
+And to make it accessible from Ubuntu Unity (and maybe other desktops):
+
+ # ln -s /opt/chj/recordvideo/recordvideo.desktop /usr/share/applications/
+
+(There's no icon yet. Would you like to provide one?)
 

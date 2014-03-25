@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Name=recordvideo
+Comment=Record Video
+Exec=/opt/chj/recordvideo/recordvideo
+Icon=
+Terminal=false
+Type=Application
+Categories=Utility;Application;
