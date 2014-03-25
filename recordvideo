@@ -381,16 +381,19 @@ our $video_field= get 'video';
 our $show_button= get 'button_show';
 
 sub tapename_entry_action {
+    my ($maybe_tapename, $maybe_statusmsg)= maybe_valid_tapename_entry_text();
+    status $maybe_statusmsg if defined $maybe_statusmsg;
     update_start_button
-	(defined maybe_valid_tapename_entry_text()
+	(defined $maybe_tapename
 	 ? "tapename_good"
 	 : "tapename_bad");
 }
 signal_set($tapename_entry,
 	   on_change=> \&tapename_entry_action);
 
+our $status_tapename= "please enter tape name";
 sub status_tapename {
-    status "please enter tape name";
+    status $status_tapename;
 }
 
 our $status= UIProcess {
@@ -510,24 +513,21 @@ our $statusupdater;
 
 
 sub maybe_valid_tapename_entry_text {
+    # returns (maybe_tapename, maybe_errormsg)
     my $tapename= chompspace $tapename_entry->get_text;
     if (length $tapename) {
 	if ($tapename =~ m |^/|) {
-	    status "'/' is used to separate subdirectory name from filename, cannot start with one";
-	    undef
+	    (undef, "'/' is used to separate subdirectory name from filename, cannot start with one")
 	} else {
 	    my ($_tapename,$_videopath,$exists)= filepaths($tapename, 0);
 	    if ($exists) {
-		status "filename already used"; # (what about letting update_start_button handle this?)
-		undef
+		(undef, "filename already used")
 	    } else {
-		status ""; # necessary?
-		$tapename
+		($tapename, undef)
 	    }
         }
     } else {
-	status_tapename;
-	undef
+	(undef, $status_tapename)
     }
 }
 
@@ -557,7 +557,10 @@ sub inputoptions {
 
 sub do_start {
     $tapename_entry->set_editable(0); # avoid race condition (well)
-    if (defined (my $tapename = maybe_valid_tapename_entry_text)) {
+    my ($maybe_tapename, $maybe_statusmsg)= maybe_valid_tapename_entry_text();
+    status $maybe_statusmsg if defined $maybe_statusmsg;
+    if (defined $maybe_tapename) {
+	my $tapename= $maybe_tapename;
 	my ($nameplus, $videopath)= filepaths $tapename,0;
 
 	# kill echo process
@@ -685,7 +688,9 @@ sub do_stop {
 	    $tapename_entry->set_editable(1);
 	    update_start_button ("stopped");
 	    # stupid, in the new way of doing things, need this:
-	    update_start_button (defined maybe_valid_tapename_entry_text() ?
+	    my ($maybe_tapename, $maybe_statusmsg)= maybe_valid_tapename_entry_text();
+	    # ignore statusmsg
+	    update_start_button (defined $maybe_tapename ?
 				 "tapename_good"
 				 : "tapename_bad");
 	    $stop_button->set_sensitive(0);
