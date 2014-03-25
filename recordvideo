@@ -521,7 +521,7 @@ sub maybe_valid_tapename_entry_text {
 	} else {
 	    my ($_tapename,$_videopath,$exists)= filepaths($tapename, 0);
 	    if ($exists) {
-		(undef, "filename already used")
+		(undef, "tape name already used")
 	    } else {
 		($tapename, undef)
 	    }
@@ -682,7 +682,7 @@ sub do_stop {
 
 	    start_echo;
 
-	    status "stopped";
+	    status "stopped. Please set a new tape name.";
 	    $tapename_clear->set_sensitive(1);
 	    $tapename_entry->set_sensitive(1);
 	    $tapename_entry->set_editable(1);
