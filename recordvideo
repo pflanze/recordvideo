@@ -422,9 +422,10 @@ sub update_start_button ($) {
 	stopped=> sub {
 	    $is_recording=0; # hacky to do this here?
 	    Perhaps_change_to
-		(\$start_button_is_stopped,1, sub {
-		    $start_button->set_sensitive(1)
-			unless $start_button_asks_tapename;
+	      (\$start_button_is_stopped,1, sub {
+		   # ugly, in the new way of doing things, don't enable the button.
+		   #$start_button->set_sensitive(1)
+		   #  unless $start_button_asks_tapename;
 		 });
 	},
 	recording=> sub {
@@ -453,7 +454,7 @@ sub update_start_button ($) {
 	tapename_bad=> sub {
 	    Perhaps_change_to
 		(\$start_button_asks_tapename,1, sub {
-		    $start_button->set_tooltip_text("Start recording. Please first enter a tape name into the above field!");
+		    $start_button->set_tooltip_text("Start recording. Please first enter a new tape name into the above field!");
 		    $start_button->set_sensitive(0)
 			if $start_button_is_stopped; # otherwise already at 0
 		 });
@@ -517,7 +518,7 @@ sub maybe_valid_tapename_entry_text {
 	} else {
 	    my ($_tapename,$_videopath,$exists)= filepaths($tapename, 0);
 	    if ($exists) {
-		status "filename already exists"; # (what about letting update_start_button handle this?)
+		status "filename already used"; # (what about letting update_start_button handle this?)
 		undef
 	    } else {
 		status ""; # necessary?
@@ -683,6 +684,10 @@ sub do_stop {
 	    $tapename_entry->set_sensitive(1);
 	    $tapename_entry->set_editable(1);
 	    update_start_button ("stopped");
+	    # stupid, in the new way of doing things, need this:
+	    update_start_button (defined maybe_valid_tapename_entry_text() ?
+				 "tapename_good"
+				 : "tapename_bad");
 	    $stop_button->set_sensitive(0);
 	}
     }
