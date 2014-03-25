@@ -439,6 +439,7 @@ sub update_start_button ($) {
 		    # (BTW update_start_button won't refuse an update!
 		    # The check for tapename must have been done
 		    # before already)
+		    $start_button->set_state("normal"); ##HACK
 		    $start_button->set_sensitive(0);
 			#unless $start_button_asks_tapename;
 		 });
@@ -458,6 +459,7 @@ sub update_start_button ($) {
 	    Perhaps_change_to
 		(\$start_button_asks_tapename,1, sub {
 		    $start_button->set_tooltip_text("Start recording. Please first enter a new tape name into the above field!");
+		    $start_button->set_state("normal"); ##HACK
 		    $start_button->set_sensitive(0)
 			if $start_button_is_stopped; # otherwise already at 0
 		 });
@@ -693,6 +695,7 @@ sub do_stop {
 	    update_start_button (defined $maybe_tapename ?
 				 "tapename_good"
 				 : "tapename_bad");
+	    $stop_button->set_state("normal"); ##HACK
 	    $stop_button->set_sensitive(0);
 	}
     }
@@ -1003,6 +1006,7 @@ sub do_show {
 
 update_start_button ("stopped"); # hm necessary?
 update_start_button ("tapename_bad");
+$stop_button->set_state("normal"); ##HACK
 $stop_button->set_sensitive(0);
 status_tapename;
 
