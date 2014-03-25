@@ -218,24 +218,33 @@ sub templated_config ($$) {
     @vals
 }
 
-sub filepaths ($) {
-    our ($tapename)= @_;
-    our $basepath= $config->get("basedir")."/$tapename-";
-    our @nums= sort {
-	$a <=> $b
-    } map {
-	if (/\Q$basepath\E(\d+)/) {
-	    $1
-	} else {
-	    warn "ignoring '$_'" if $verbose;
-	    ()
-	}
-    } glob "${basepath}*";
-    my $highest_num= $nums[-1] || 0;
-    my $num= $highest_num+1;
-    my $b= $basepath . $num;
-    ($tapename . "-" . $num,
-     $b . $videosuffix)
+sub filepaths ($$) {
+    our ($tapename,$autoincrement)= @_;
+    our $basepath= $config->get("basedir")."/$tapename";
+    if ($autoincrement) {
+	$basepath.= "-";
+	our @nums= sort {
+	    $a <=> $b
+	} map {
+	    if (/\Q$basepath\E(\d+)/) {
+		$1
+	    } else {
+		warn "ignoring '$_'" if $verbose;
+		()
+	    }
+	} glob "${basepath}*";
+	my $highest_num= $nums[-1] || 0;
+	my $num= $highest_num+1;
+	my $b= $basepath . $num;
+	($tapename . "-" . $num,
+	 $b . $videosuffix,
+	 undef)
+    } else {
+	my $videopath= $basepath . $videosuffix;
+	($tapename,
+	 $videopath,
+	 -e $videopath)
+    }
 }
 
 our $builder= new Gtk3::Builder;
@@ -506,7 +515,14 @@ sub maybe_valid_tapename_entry_text {
 	    status "'/' is used to separate subdirectory name from filename, cannot start with one";
 	    undef
 	} else {
-	    $tapename
+	    my ($_tapename,$_videopath,$exists)= filepaths($tapename, 0);
+	    if ($exists) {
+		status "filename already exists"; # (what about letting update_start_button handle this?)
+		undef
+	    } else {
+		status ""; # necessary?
+		$tapename
+	    }
         }
     } else {
 	status_tapename;
@@ -541,7 +557,7 @@ sub inputoptions {
 sub do_start {
     $tapename_entry->set_editable(0); # avoid race condition (well)
     if (defined (my $tapename = maybe_valid_tapename_entry_text)) {
-	my ($nameplus, $videopath)= filepaths $tapename;
+	my ($nameplus, $videopath)= filepaths $tapename,0;
 
 	# kill echo process
 	Stop_then $mplayer, sub {
