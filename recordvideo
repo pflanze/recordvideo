@@ -564,6 +564,7 @@ sub do_start {
     if (defined $maybe_tapename) {
 	my $tapename= $maybe_tapename;
 	my ($nameplus, $videopath)= filepaths $tapename,0;
+	xmkdir_p dirname $videopath;
 
 	# kill echo process
 	Stop_then $mplayer, sub {
