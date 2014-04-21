@@ -380,14 +380,20 @@ our $stop_button = get 'button_stop';
 our $video_field= get 'video';
 our $show_button= get 'button_show';
 
-sub tapename_entry_action {
+# A process so that it can be called asynchronically, too
+our $tapename_check= UIProcess {
     my ($maybe_tapename, $maybe_statusmsg)= maybe_valid_tapename_entry_text();
     status $maybe_statusmsg if defined $maybe_statusmsg;
     update_start_button
 	(defined $maybe_tapename
 	 ? "tapename_good"
 	 : "tapename_bad");
+};# $collector; -- no, that is only for real processes, right?
+
+sub tapename_entry_action {
+    $tapename_check->send();
 }
+
 signal_set($tapename_entry,
 	   on_change=> \&tapename_entry_action);
 
