@@ -514,6 +514,7 @@ our $mencoder;
 our $mplayer;
 # echo
 our $echo;
+our $tapename_checker;
 # test
 our $aplay_test;
 
@@ -575,67 +576,69 @@ sub do_start {
 	# kill echo process
 	Stop_then $mplayer, sub {
 	    Stop_then $echo, sub {
+		Stop_then $tapename_checker, sub {
 
-		# start recorder process
-		$mencoder= Process {
-		    psname "mencoder";
-		    my $log= logfh "mencoder";
-		    xxINTlogsystem($log,
-				   1,
-				   [DBG
-				    templated_config
-				    "mencoder_cmd",
-				    +{VIDEODEV=> config ("videodev"),
-				      AUDIOINPUTDEV=> config ("audiodev_input"),
-				      MANGLEDAUDIOINPUTDEV=>
-					  mangle_dev(config ("audiodev_input")),
-				      VIDEOPATH=> $videopath,
-				      INPUTOPTIONS=> [inputoptions],
-				    }]);
-		    unlink $log->path; # XX config?
-		} $collector;
+		    # start recorder process
+		    $mencoder= Process {
+			psname "mencoder";
+			my $log= logfh "mencoder";
+			xxINTlogsystem($log,
+				       1,
+				       [DBG
+					templated_config
+					"mencoder_cmd",
+					+{VIDEODEV=> config ("videodev"),
+					  AUDIOINPUTDEV=> config ("audiodev_input"),
+					  MANGLEDAUDIOINPUTDEV=>
+					      mangle_dev(config ("audiodev_input")),
+					  VIDEOPATH=> $videopath,
+					  INPUTOPTIONS=> [inputoptions],
+					}]);
+			unlink $log->path; # XX config?
+		    } $collector;
 
-		$statusupdater= Process {
-		    psname "statusupdater";
-		    my $start= time; # hires!
-		    my $lastd=-1; # last shown diff, integer
-		    while (1) {
-			my $t= time;
-			my $d= int( $t - $start );
-			if ($d != $lastd) {
-			    $lastd=$d;
-			    $status->send
-				("recording ".t2hms ($d)." '$nameplus'");
+		    $statusupdater= Process {
+			psname "statusupdater";
+			my $start= time; # hires!
+			my $lastd=-1; # last shown diff, integer
+			while (1) {
+			    my $t= time;
+			    my $d= int( $t - $start );
+			    if ($d != $lastd) {
+				$lastd=$d;
+				$status->send
+				    ("recording ".t2hms ($d)." '$nameplus'");
+			    }
+			    sleep 0.2;
 			}
-			sleep 0.2;
-		    }
-		} $collector;
+		    } $collector;
 
-		# start delayed play process
-		$mplayer= pipeline_Process_with_prethunk
-		    (sub {
-			psname "delayed-mplayer";
-			sleep $playback_delay;
-			xpoll_for_file_to_appear $videopath, 10;
-			close STDOUT;
-			close STDERR;
-			close STDIN;
-		     },
-		     [Subcmd
-		      ("delayed_mplayer_tail",
-		       [DBG
-			"tail", "-f", "-c", "20000000", "--", $videopath]),
-		      Subcmd
-		      ("delayed_mplayer",
-		       delayed_mplayer_cmd)],
-		     $collector);
+		    # start delayed play process
+		    $mplayer= pipeline_Process_with_prethunk
+			(sub {
+			    psname "delayed-mplayer";
+			    sleep $playback_delay;
+			    xpoll_for_file_to_appear $videopath, 10;
+			    close STDOUT;
+			    close STDERR;
+			    close STDIN;
+			 },
+			 [Subcmd
+			  ("delayed_mplayer_tail",
+			   [DBG
+			    "tail", "-f", "-c", "20000000", "--", $videopath]),
+			  Subcmd
+			  ("delayed_mplayer",
+			   delayed_mplayer_cmd)],
+			 $collector);
 
-		$status->send ("recording '$nameplus'");
-		# status is afterwards updated through sep process
-		$tapename_entry->set_sensitive(0);
-		$tapename_clear->set_sensitive(0);
-		update_start_button ("recording");
-		$stop_button->set_sensitive(1);
+		    $status->send ("recording '$nameplus'");
+		    # status is afterwards updated through sep process
+		    $tapename_entry->set_sensitive(0);
+		    $tapename_clear->set_sensitive(0);
+		    update_start_button ("recording");
+		    $stop_button->set_sensitive(1);
+		}
 	    }
 	};
 
@@ -664,6 +667,20 @@ sub start_echo {
 	      })}]));
 }
 
+# tapename_checker checks tapename periodically even if nothing
+# changes in the UI: the file might have been deleted
+# asynchronically. No way around polling (unless we'd want to look
+# into file notification frameworks).
+sub start_tapename_checker {
+    $tapename_checker= Process {
+	while (1) {
+	    sleep 1;
+	    $tapename_check->send();
+	}
+    } $collector
+}
+
+
 sub make_restart {
     my ($varref, $start)=@_;
     sub {
@@ -690,6 +707,7 @@ sub do_stop {
 	    Stop $statusupdater;
 
 	    start_echo;
+	    start_tapename_checker;
 
 	    status "stopped. Please set a new tape name.";
 	    $tapename_clear->set_sensitive(1);
@@ -714,6 +732,7 @@ sub do_quit {
     # do rest here, too, anyway
     Stop $mencoder;
     Stop $echo;
+    Stop $tapename_checker;
     Stop $aplay_test;
     Stop $statusupdater;
 
@@ -1035,6 +1054,7 @@ $window1->show_all;
 
 #use Chj::repl; repl; exit;
 start_echo;
+start_tapename_checker;
 
 $tapename_entry->grab_focus;
 
